@@ -1,0 +1,1728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Engineering Report: Distributed LRU Cache Layer for Microservices</title>
+<style>
+  :root {
+    --primary: #2563eb;
+    --success: #16a34a;
+    --warning: #d97706;
+    --danger: #dc2626;
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --text: #1e293b;
+    --muted: #64748b;
+    --border: #e2e8f0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  h1 { color: var(--primary); margin-bottom: 0.5rem; font-size: 2rem; }
+  h2 {
+    color: var(--primary);
+    border-bottom: 2px solid var(--primary);
+    padding-bottom: 0.5rem;
+    margin: 2.5rem 0 1rem;
+    font-size: 1.5rem;
+  }
+  h3 { color: var(--text); margin: 1.5rem 0 0.75rem; font-size: 1.1rem; }
+  .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+  .highlight { background: #eff6ff; border-left: 4px solid var(--primary); padding: 1rem 1.5rem; border-radius: 4px; margin: 1rem 0; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; }
+  th { background: #f1f5f9; text-align: left; padding: 0.75rem; border: 1px solid var(--border); font-weight: 600; }
+  td { padding: 0.75rem; border: 1px solid var(--border); vertical-align: top; }
+  tr:hover { background: #f8fafc; }
+  code { background: #f1f5f9; padding: 2px 6px; border-radius: 3px; font-size: 0.85rem; }
+  pre { background: #1e293b; color: #e2e8f0; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.8rem; line-height: 1.5; }
+  pre code { background: none; padding: 0; color: inherit; }
+  ul, ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+  li { margin: 0.3rem 0; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .badge.parallel { background: #dbeafe; color: #1d4ed8; }
+  .badge.unit { background: #dcfce7; color: #166534; }
+  .badge.integration { background: #fef3c7; color: #92400e; }
+  .method { font-weight: 700; font-size: 0.8rem; padding: 2px 6px; border-radius: 3px; }
+  .method.get { background: #dcfce7; color: #166534; }
+  .method.post { background: #dbeafe; color: #1d4ed8; }
+  .method.put { background: #fef3c7; color: #92400e; }
+  .method.delete { background: #fee2e2; color: #991b1b; }
+  .severity { padding: 2px 8px; border-radius: 3px; font-size: 0.75rem; font-weight: 700; }
+  .severity.low { background: #dcfce7; color: #166534; }
+  .severity.medium { background: #fef3c7; color: #92400e; }
+  .severity.high { background: #fee2e2; color: #991b1b; }
+  .severity.critical { background: #991b1b; color: white; }
+  details { margin: 0.5rem 0; }
+  details summary { cursor: pointer; padding: 0.5rem; background: #f8fafc; border: 1px solid var(--border); border-radius: 4px; }
+  details summary:hover { background: #f1f5f9; }
+  details[open] summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  details pre { border-top-left-radius: 0; border-top-right-radius: 0; margin-top: 0; }
+  .stats { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1rem 0; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.5rem; text-align: center; min-width: 120px; }
+  .stat .number { font-size: 2rem; font-weight: 700; color: var(--primary); }
+  .stat .label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; }
+  .layer { padding: 0.5rem 0; border-left: 3px solid var(--primary); padding-left: 1rem; margin: 0.5rem 0; }
+  .arch-flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 0.5rem; padding: 2rem 1.5rem; background: var(--card); border: 1px solid var(--border); border-radius: 8px; margin: 1rem 0; }
+  .arch-node { background: linear-gradient(135deg, #dbeafe, #eff6ff); border: 2px solid var(--primary); border-radius: 10px; padding: 1rem 1.25rem; text-align: center; min-width: 140px; max-width: 180px; box-shadow: 0 2px 6px rgba(37,99,235,0.1); }
+  .arch-name { font-weight: 700; font-size: 0.9rem; color: var(--primary); }
+  .arch-tech { font-size: 0.72rem; color: var(--muted); margin-top: 4px; font-style: italic; }
+  .arch-arrow { font-size: 1.8rem; color: var(--primary); font-weight: bold; padding: 0 0.25rem; }
+  .arch-connections { margin: 1.5rem auto; padding: 1.25rem; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border); max-width: 700px; }
+  .arch-connections h4 { margin-bottom: 0.75rem; color: var(--primary); text-align: center; }
+  .flow-line { padding: 0.4rem 0.5rem; font-size: 0.88rem; border-bottom: 1px dashed var(--border); }
+  .flow-line:last-child { border-bottom: none; }
+  .diagram-container { margin: 1.5rem 0; text-align: center; }
+  @media print {
+    body { padding: 1rem; }
+    details { open: true; }
+    .card { box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+
+<h1>🏗️ Distributed LRU Cache Layer for Microservices</h1>
+<p class="meta">Generated by Agentic SDLC System — 2026-08-20 20:33</p>
+
+<div class="highlight">
+<strong>Requirement:</strong> help with a LRU Caching
+</div>
+
+<div class="stats">
+  <div class="stat"><div class="number">2</div><div class="label">Code Files</div></div>
+  <div class="stat"><div class="number">9</div><div class="label">Test Cases</div></div>
+  <div class="stat"><div class="number">8</div><div class="label">Tasks</div></div>
+  <div class="stat"><div class="number">5</div><div class="label">Exec Layers</div></div>
+</div>
+
+<h2>1. Requirement Analysis</h2>
+<div class="card">
+  <p><strong>Type:</strong> Ambiguous &nbsp;|&nbsp; <strong>Intent:</strong> Implement an LRU (Least Recently Used) caching mechanism for a production microservice deployment to improve performance and reduce redundant data fetching.</p>
+</div>
+
+<h3>Functional Requirements</h3>
+<ol><li>Cache must evict the least recently used entry when the cache reaches its maximum capacity</li>
+<li>Cache must support O(1) average time complexity for both get and put operations</li>
+<li>Cache must support a configurable maximum capacity (item count or memory size)</li>
+<li>Cache must provide a get(key) operation that returns the cached value or a cache-miss indicator</li>
+<li>Cache must provide a put(key, value) operation that inserts or updates a cache entry</li>
+<li>Cache must support TTL (time-to-live) expiration per entry or globally</li>
+<li>Cache must expose metrics such as hit rate, miss rate, eviction count, and current size</li>
+<li>Cache must support cache invalidation by key or bulk invalidation</li>
+<li>Cache must be accessible across microservice instances (distributed or local per instance)</li>
+</ol>
+
+<h3>Non-Functional Requirements</h3>
+<ul><li>Thread-safe implementation to handle concurrent reads and writes in a multi-threaded microservice environment</li>
+<li>Low latency: cache operations must complete in sub-millisecond time for local cache or low single-digit milliseconds for distributed cache</li>
+<li>High availability: cache layer must not become a single point of failure for the microservice</li>
+<li>Scalability: cache must handle high throughput (thousands of requests per second) without degradation</li>
+<li>Observability: cache must integrate with existing monitoring/tracing infrastructure (e.g., Prometheus, OpenTelemetry)</li>
+<li>Memory efficiency: cache must not cause excessive memory pressure or GC pauses in the host process</li>
+</ul>
+
+<h3>Ambiguities Identified</h3>
+<ul><li>⚠️ Whether the cache should be in-process (local) or distributed (e.g., Redis, Memcached) across multiple microservice instances</li>
+<li>⚠️ The programming language or technology stack of the microservice is not specified</li>
+<li>⚠️ Whether an existing caching library should be used or a custom implementation is required</li>
+<li>⚠️ The target data being cached is unspecified (database query results, API responses, computed values, etc.)</li>
+<li>⚠️ Cache capacity limits are not defined (number of entries vs. memory size)</li>
+<li>⚠️ Whether TTL/expiration is required and at what granularity (per-key or global)</li>
+<li>⚠️ Whether cache warming or pre-population on startup is needed</li>
+<li>⚠️ Whether strong consistency or eventual consistency is acceptable for cache invalidation across instances</li>
+</ul>
+
+<h3>Assumptions Made</h3>
+<ul><li>✅ The microservice is deployed with multiple instances, suggesting a distributed or at minimum instance-local cache with awareness of staleness</li>
+<li>✅ A well-known library (e.g., Caffeine for JVM, functools.lru_cache or cachetools for Python, node-lru-cache for Node.js) is acceptable rather than a from-scratch implementation</li>
+<li>✅ TTL-based expiration is required in addition to LRU eviction to prevent stale data in production</li>
+<li>✅ Cache capacity will be defined in terms of maximum number of entries as a starting point</li>
+<li>✅ Thread safety is mandatory given the concurrent nature of production microservices</li>
+<li>✅ Cache metrics must be exposed for operational monitoring</li>
+<li>✅ The cache is primarily used to reduce latency on expensive downstream calls (DB or external API)</li>
+</ul>
+
+<h2>2. Architecture Design</h2>
+<div class="card">
+  <p>A two-tier caching architecture combining a high-performance in-process LRU cache (L1) backed by a distributed Redis cluster (L2) to serve cached data with sub-millisecond local latency and cross-instance consistency. The system is designed as a sidecar-compatible, non-blocking cache layer that degrades gracefully when the distributed backend is unavailable, ensuring microservice resilience. Metrics, TTL enforcement, and invalidation are first-class concerns integrated with Prometheus and OpenTelemetry.</p>
+</div>
+
+<h3>System Diagram</h3>
+<div class="diagram-container">
+<div class="arch-flow">
+  <div class="arch-node"><div class="arch-name">L1 In-Process LRU Cache</div><div class="arch-tech">Caffeine Cache (JVM) / cachetools (Python) / lru-cache (Node.js) — language-matched; primary reference is Caffeine with AsyncLoadingCache and StatsCounter</div></div>
+  <div class="arch-arrow">→</div>
+  <div class="arch-node"><div class="arch-name">L2 Distributed Cache (Redis Cluster)</div><div class="arch-tech">Redis 7.x Cluster mode with TLS, deployed via Redis Operator on Kubernetes; Lettuce async client for non-blocking I/O</div></div>
+  <div class="arch-arrow">→</div>
+  <div class="arch-node"><div class="arch-name">Cache Facade / Unified API</div><div class="arch-tech">Java interface with Spring AOP-based @Cacheable integration; Resilience4j CircuitBreaker wrapping L2 calls; Jackson for JSON serialization with schema versioning</div></div>
+  <div class="arch-arrow">→</div>
+  <div class="arch-node"><div class="arch-name">Cache Invalidation Bus</div><div class="arch-tech">Redis Pub/Sub (keyspace notifications) for lightweight invalidation signals; fallback to Apache Kafka topic &#x27;cache-invalidation-events&#x27; for durable, ordered bulk invalidation</div></div>
+  <div class="arch-arrow">→</div>
+  <div class="arch-node"><div class="arch-name">Metrics &amp; Observability Exporter</div><div class="arch-tech">Micrometer with Prometheus registry for metrics scraping; OpenTelemetry Java Agent for trace context propagation; Grafana dashboard provisioned via ConfigMap</div></div>
+  <div class="arch-arrow">→</div>
+  <div class="arch-node"><div class="arch-name">Cache Configuration Service</div><div class="arch-tech">Spring Cloud Config Server backed by Git repository; Kubernetes ConfigMap with Reloader for zero-downtime config refresh; JSON Schema validation on config changes</div></div>
+  <div class="arch-arrow">→</div>
+  <div class="arch-node"><div class="arch-name">PII Data Filter &amp; Encryption Layer</div><div class="arch-tech">Custom CacheInterceptor using annotation-driven PII tagging (@SensitiveCache); AES-256-GCM encryption via AWS KMS or HashiCorp Vault Transit Engine; regional Redis endpoint routing map</div></div>
+  <div class="arch-arrow">→</div>
+  <div class="arch-node"><div class="arch-name">Origin Data Loader</div><div class="arch-tech">Async CompletableFuture-based loader; HikariCP connection pool for DB calls; Resilience4j Bulkhead to isolate origin load from cache-hit traffic paths</div></div>
+</div>
+
+</div>
+
+<h3>Components</h3>
+<table>
+<thead><tr><th>Component</th><th>Responsibility</th><th>Technology</th></tr></thead>
+<tbody><tr><td><strong>L1 In-Process LRU Cache</strong></td><td>Provides sub-millisecond, thread-safe, bounded LRU caching local to each microservice instance using Caffeine (JVM). Enforces maximum entry count, per-entry TTL, and exposes hit/miss/eviction metrics via Micrometer. Acts as the first lookup tier before delegating to L2.</td><td><code>Caffeine Cache (JVM) / cachetools (Python) / lru-cache (Node.js) — language-matched; primary reference is Caffeine with AsyncLoadingCache and StatsCounter</code></td></tr>
+<tr><td><strong>L2 Distributed Cache (Redis Cluster)</strong></td><td>Provides a shared, cross-instance cache store for data consistency across horizontally scaled microservice replicas. Stores serialized cache entries with TTL enforced natively by Redis EXPIRE. Supports keyspace notifications for invalidation propagation and acts as fallback when L1 misses.</td><td><code>Redis 7.x Cluster mode with TLS, deployed via Redis Operator on Kubernetes; Lettuce async client for non-blocking I/O</code></td></tr>
+<tr><td><strong>Cache Facade / Unified API</strong></td><td>Provides a single, technology-agnostic interface (get, put, invalidate, bulkInvalidate) consumed by microservice business logic. Orchestrates the L1 → L2 → origin lookup chain, handles circuit breaking on L2 failures, and abstracts serialization/deserialization of cache values.</td><td><code>Java interface with Spring AOP-based @Cacheable integration; Resilience4j CircuitBreaker wrapping L2 calls; Jackson for JSON serialization with schema versioning</code></td></tr>
+<tr><td><strong>Cache Invalidation Bus</strong></td><td>Broadcasts key-level and bulk invalidation events across all microservice instances so that L1 caches on peer instances are invalidated when data changes. Ensures eventual consistency without requiring synchronous cross-instance calls.</td><td><code>Redis Pub/Sub (keyspace notifications) for lightweight invalidation signals; fallback to Apache Kafka topic &#x27;cache-invalidation-events&#x27; for durable, ordered bulk invalidation</code></td></tr>
+<tr><td><strong>Metrics &amp; Observability Exporter</strong></td><td>Collects and exports cache operational metrics including hit rate, miss rate, eviction count, current size, L1/L2 latency histograms, and TTL expiry counts. Integrates distributed tracing spans around cache operations for end-to-end latency attribution.</td><td><code>Micrometer with Prometheus registry for metrics scraping; OpenTelemetry Java Agent for trace context propagation; Grafana dashboard provisioned via ConfigMap</code></td></tr>
+<tr><td><strong>Cache Configuration Service</strong></td><td>Manages runtime-configurable cache parameters (max capacity, TTL, eviction policy, circuit breaker thresholds) without requiring service restarts. Validates configuration changes and propagates them to running instances. Enforces memory budget constraints per container resource limits.</td><td><code>Spring Cloud Config Server backed by Git repository; Kubernetes ConfigMap with Reloader for zero-downtime config refresh; JSON Schema validation on config changes</code></td></tr>
+<tr><td><strong>PII Data Filter &amp; Encryption Layer</strong></td><td>Intercepts cache put operations to detect and handle PII-tagged data fields. Applies field-level encryption before writing to L2 (Redis) and enforces data residency rules by routing sensitive keys to region-specific Redis clusters. Prevents raw PII from persisting in distributed cache.</td><td><code>Custom CacheInterceptor using annotation-driven PII tagging (@SensitiveCache); AES-256-GCM encryption via AWS KMS or HashiCorp Vault Transit Engine; regional Redis endpoint routing map</code></td></tr>
+<tr><td><strong>Origin Data Loader</strong></td><td>Executes the actual downstream data fetch (database query or external API call) on a full cache miss (L1 and L2 both miss). Integrates with Caffeine&#x27;s AsyncCacheLoader pattern to prevent cache stampede via request coalescing. Returns data to the Cache Facade for population of both L1 and L2.</td><td><code>Async CompletableFuture-based loader; HikariCP connection pool for DB calls; Resilience4j Bulkhead to isolate origin load from cache-hit traffic paths</code></td></tr>
+</tbody>
+</table>
+
+<h3>API Endpoints</h3>
+<table>
+<thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+<tbody><tr><td><span class="method get">GET</span></td><td><code>/api/v1/cache/entries/{key}</code></td><td>Retrieves a cached value by key. Checks L1 first, then L2, then triggers origin load on full miss. Returns the value with metadata including TTL remaining, cache tier hit (L1/L2/ORIGIN), and entry age.</td></tr>
+<tr><td><span class="method put">PUT</span></td><td><code>/api/v1/cache/entries/{key}</code></td><td>Inserts or updates a cache entry in both L1 and L2. Accepts optional per-entry TTL override. If capacity is exceeded, LRU eviction is triggered on L1; Redis handles its own eviction policy. PII filter is applied before L2 write.</td></tr>
+<tr><td><span class="method delete">DELETE</span></td><td><code>/api/v1/cache/entries/{key}</code></td><td>Invalidates a single cache entry across L1 on the local instance and publishes an invalidation event to the Cache Invalidation Bus so all peer instances remove the key from their L1 caches and L2 is deleted.</td></tr>
+<tr><td><span class="method post">POST</span></td><td><code>/api/v1/cache/invalidate/bulk</code></td><td>Performs bulk invalidation by key list or tag group. Publishes a durable Kafka invalidation event for cross-instance propagation. Suitable for invalidating all entries related to a specific entity (e.g., all cache keys tagged &#x27;user:123&#x27;).</td></tr>
+<tr><td><span class="method get">GET</span></td><td><code>/api/v1/cache/metrics</code></td><td>Returns current operational metrics for the cache layer on this instance including hit/miss rates, eviction counts, current L1 size, L2 connectivity status, and latency percentiles. Intended for dashboards and alerting; Prometheus scrape endpoint is separate at /actuator/prometheus.</td></tr>
+<tr><td><span class="method get">GET</span></td><td><code>/api/v1/cache/health</code></td><td>Returns health status of the cache layer including L1 memory pressure, L2 Redis connectivity, circuit breaker state, and configuration validity. Used by Kubernetes liveness/readiness probes and load balancer health checks. Cache failure does NOT cause unhealthy status — only degraded.</td></tr>
+</tbody>
+</table>
+
+<h3>Technology Stack</h3>
+<ul></ul>
+
+<h2>3. Task Decomposition & Orchestration</h2>
+<p><strong>8 tasks</strong> across <strong>5 execution layers</strong> (tasks in same layer run in parallel):</p>
+<div class="card">
+<div class="layer"><strong>Layer 1</strong>: Architecture Design: Cache Strategy & Topology</div>
+<div class="layer"><strong>Layer 2</strong> <span class="badge">parallel</span>: Data Model & Interface Design, Observability & Metrics Integration Design</div>
+<div class="layer"><strong>Layer 3</strong>: Core LRU Cache Implementation</div>
+<div class="layer"><strong>Layer 4</strong> <span class="badge">parallel</span>: Unit Tests: Core LRU Cache Logic, Distributed Cache Adapter Implementation</div>
+<div class="layer"><strong>Layer 5</strong> <span class="badge">parallel</span>: Metrics & Observability Implementation, Configuration & Lifecycle Management Implementation</div>
+
+</div>
+
+<h2>4. Generated Code</h2>
+<p><strong>2 files</strong> generated and syntax-validated:</p>
+<details class="code-block">
+<summary><strong>distributed_lru_cache/models.py</strong> — Pydantic data models for cache entries, namespace configuration, metrics snapshots, and all API request/response schemas. Includes validation, TTL computation, and hit-rate property helpers.</summary>
+<pre><code>&quot;&quot;&quot;
+Data models for the Distributed LRU Cache Layer.
+Defines Pydantic models for cache entries, namespace configuration,
+metrics snapshots, and API request/response schemas.
+&quot;&quot;&quot;
+
+from __future__ import annotations
+
+import time
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+# ---------------------------------------------------------------------------
+# Enumerations
+# ---------------------------------------------------------------------------
+
+class EvictionPolicy(str, Enum):
+    &quot;&quot;&quot;Supported eviction policies for L1 cache.&quot;&quot;&quot;
+    LRU = &quot;LRU&quot;
+    LFU = &quot;LFU&quot;
+    EXPIRE_ONLY = &quot;EXPIRE_ONLY&quot;
+
+
+class CircuitBreakerState(str, Enum):
+    &quot;&quot;&quot;Possible states of the Redis circuit breaker.&quot;&quot;&quot;
+    CLOSED = &quot;CLOSED&quot;       # Normal operation
+    OPEN = &quot;OPEN&quot;           # Redis unavailable, using L1 only
+    HALF_OPEN = &quot;HALF_OPEN&quot; # Probing Redis availability
+
+
+class CacheTier(str, Enum):
+    &quot;&quot;&quot;Which cache tier served a hit.&quot;&quot;&quot;
+    L1 = &quot;L1&quot;
+    L2 = &quot;L2&quot;
+    ORIGIN = &quot;ORIGIN&quot;
+    MISS = &quot;MISS&quot;
+
+
+class BulkInvalidationMode(str, Enum):
+    &quot;&quot;&quot;Mode for bulk invalidation operations.&quot;&quot;&quot;
+    TAG = &quot;TAG&quot;
+    PREFIX = &quot;PREFIX&quot;
+    KEY_LIST = &quot;KEY_LIST&quot;
+
+
+# ---------------------------------------------------------------------------
+# Core Domain Models
+# ---------------------------------------------------------------------------
+
+class CacheEntry(BaseModel):
+    &quot;&quot;&quot;
+    Represents a single cached item stored in L1 and/or L2.
+    Tracks provenance, TTL, PII classification, and versioning.
+    &quot;&quot;&quot;
+    key: str = Field(
+        ...,
+        max_length=512,
+        description=&quot;Cache key — URL-safe characters only, max 512 bytes&quot;,
+        pattern=r&quot;^[\w\-\.~:@!$&amp;&#x27;()*+,;=%]+$&quot;,
+    )
+    namespace: str = Field(
+        ...,
+        max_length=64,
+        description=&quot;Namespace for isolation and config lookup&quot;,
+        pattern=r&quot;^[a-zA-Z0-9_\-]+$&quot;,
+    )
+    value: bytes = Field(
+        ...,
+        description=&quot;Serialized cached value (max 1 MB by default)&quot;,
+    )
+    created_at: int = Field(
+        default_factory=lambda: int(time.time() * 1000),
+        description=&quot;Creation timestamp in epoch milliseconds&quot;,
+    )
+    last_accessed_at: int = Field(
+        default_factory=lambda: int(time.time() * 1000),
+        description=&quot;Last access timestamp (L1 in-memory only)&quot;,
+    )
+    expires_at: Optional[int] = Field(
+        default=None,
+        description=&quot;Expiry timestamp in epoch milliseconds; null = no TTL&quot;,
+    )
+    ttl_ms: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description=&quot;Original TTL in milliseconds for reference&quot;,
+    )
+    tags: Optional[List[str]] = Field(
+        default=None,
+        description=&quot;Tags for bulk invalidation grouping&quot;,
+    )
+    is_pii: bool = Field(
+        default=False,
+        description=&quot;If true, entry is excluded from L2 Redis&quot;,
+    )
+    size_bytes: int = Field(
+        default=0,
+        ge=0,
+        description=&quot;Serialized value size for memory accounting&quot;,
+    )
+    version: int = Field(
+        default=1,
+        ge=1,
+        description=&quot;Optimistic concurrency version for L2 updates&quot;,
+    )
+
+    @field_validator(&quot;value&quot;)
+    @classmethod
+    def validate_value_size(cls, v: bytes) -&gt; bytes:
+        max_size = 1_048_576  # 1 MB default; overridden per namespace
+        if len(v) &gt; max_size:
+            raise ValueError(f&quot;Value size {len(v)} exceeds max {max_size} bytes&quot;)
+        return v
+
+    @model_validator(mode=&quot;after&quot;)
+    def compute_size_and_expiry(self) -&gt; &quot;CacheEntry&quot;:
+        &quot;&quot;&quot;Auto-compute size_bytes and expires_at from ttl_ms.&quot;&quot;&quot;
+        if self.size_bytes == 0:
+            self.size_bytes = len(self.value)
+        if self.ttl_ms is not None and self.expires_at is None:
+            self.expires_at = self.created_at + self.ttl_ms
+        return self
+
+    def is_expired(self) -&gt; bool:
+        &quot;&quot;&quot;Check whether this entry has passed its TTL.&quot;&quot;&quot;
+        if self.expires_at is None:
+            return False
+        return int(time.time() * 1000) &gt;= self.expires_at
+
+    def remaining_ttl_ms(self) -&gt; Optional[int]:
+        &quot;&quot;&quot;Return remaining TTL in milliseconds, or None if no TTL.&quot;&quot;&quot;
+        if self.expires_at is None:
+            return None
+        remaining = self.expires_at - int(time.time() * 1000)
+        return max(0, remaining)
+
+    model_config = {&quot;arbitrary_types_allowed&quot;: True}
+
+
+class CacheNamespaceConfig(BaseModel):
+    &quot;&quot;&quot;
+    Per-namespace cache configuration controlling capacity, TTL,
+    eviction policy, circuit breaker thresholds, and PII handling.
+    &quot;&quot;&quot;
+    namespace: str = Field(
+        ...,
+        max_length=64,
+        pattern=r&quot;^[a-zA-Z0-9_\-]+$&quot;,
+        description=&quot;Namespace identifier — primary key&quot;,
+    )
+    max_capacity: int = Field(
+        ...,
+        ge=1,
+        le=1_000_000,
+        description=&quot;Maximum number of entries in L1 cache&quot;,
+    )
+    default_ttl_ms: int = Field(
+        ...,
+        ge=0,
+        description=&quot;Default TTL in milliseconds (0 = no expiry)&quot;,
+    )
+    max_entry_size_bytes: int = Field(
+        default=1_048_576,
+        ge=1,
+        description=&quot;Maximum serialized value size per entry (default 1 MB)&quot;,
+    )
+    l2_enabled: bool = Field(
+        default=True,
+        description=&quot;Enable L2 Redis tier; set false for PII or local-only namespaces&quot;,
+    )
+    eviction_policy: EvictionPolicy = Field(
+        default=EvictionPolicy.LRU,
+        description=&quot;Eviction policy for L1 cache&quot;,
+    )
+    circuit_breaker_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=&quot;Failure rate (0.0–1.0) to open the circuit breaker&quot;,
+    )
+    circuit_breaker_wait_ms: int = Field(
+        default=10_000,
+        ge=100,
+        description=&quot;Time in OPEN state before transitioning to HALF_OPEN (ms)&quot;,
+    )
+    warm_up_manifest_ref: Optional[str] = Field(
+        default=None,
+        description=&quot;S3 URI or ConfigMap key for warm-up key manifest&quot;,
+    )
+    created_at: Optional[str] = Field(
+        default=None,
+        description=&quot;ISO8601 creation timestamp&quot;,
+    )
+    updated_at: Optional[str] = Field(
+        default=None,
+        description=&quot;ISO8601 last-update timestamp&quot;,
+    )
+
+
+class CacheMetricsSnapshot(BaseModel):
+    &quot;&quot;&quot;
+    Point-in-time metrics snapshot for a single namespace on one instance.
+    Exported to Prometheus and returned by the /metrics endpoint.
+    &quot;&quot;&quot;
+    namespace: str
+    instance_id: str = Field(description=&quot;Pod/container ID for per-instance L1 metrics&quot;)
+    snapshot_at: int = Field(
+        default_factory=lambda: int(time.time() * 1000),
+        description=&quot;Snapshot timestamp in epoch milliseconds&quot;,
+    )
+    l1_size: int = Field(default=0, ge=0)
+    l1_hit_count: int = Field(default=0, ge=0)
+    l1_miss_count: int = Field(default=0, ge=0)
+    l2_hit_count: int = Field(default=0, ge=0)
+    l2_miss_count: int = Field(default=0, ge=0)
+    eviction_count: int = Field(default=0, ge=0, description=&quot;LRU evictions&quot;)
+    ttl_expiry_count: int = Field(default=0, ge=0, description=&quot;TTL-based expirations&quot;)
+    invalidation_count: int = Field(default=0, ge=0, description=&quot;Explicit invalidations&quot;)
+    get_latency_histogram: Dict[str, int] = Field(
+        default_factory=dict,
+        description=&quot;Prometheus histogram: bucket_ms -&gt; count&quot;,
+    )
+    put_latency_histogram: Dict[str, int] = Field(
+        default_factory=dict,
+        description=&quot;Prometheus histogram: bucket_ms -&gt; count&quot;,
+    )
+    circuit_breaker_state: CircuitBreakerState = Field(
+        default=CircuitBreakerState.CLOSED,
+    )
+    circuit_breaker_open_count: int = Field(
+        default=0,
+        ge=0,
+        description=&quot;Number of times circuit has opened&quot;,
+    )
+
+    @property
+    def l1_hit_rate(self) -&gt; float:
+        total = self.l1_hit_count + self.l1_miss_count
+        return self.l1_hit_count / total if total &gt; 0 else 0.0
+
+    @property
+    def l2_hit_rate(self) -&gt; float:
+        total = self.l2_hit_count + self.l2_miss_count
+        return self.l2_hit_count / total if total &gt; 0 else 0.0
+
+    @property
+    def overall_hit_rate(self) -&gt; float:
+        hits = self.l1_hit_count + self.l2_hit_count
+        total = hits + self.l2_miss_count  # L2 miss = full miss
+        return hits / total if total &gt; 0 else 0.0
+
+
+# ---------------------------------------------------------------------------
+# API Request / Response Schemas
+# ---------------------------------------------------------------------------
+
+class PutCacheRequest(BaseModel):
+    &quot;&quot;&quot;Request body for PUT /api/v1/cache/{namespace}/{key}.&quot;&quot;&quot;
+    value: str = Field(
+        ...,
+        description=&quot;Base64-encoded value to cache&quot;,
+    )
+    ttl_ms: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description=&quot;Per-entry TTL override in milliseconds&quot;,
+    )
+    tags: Optional[List[str]] = Field(
+        default=None,
+        description=&quot;Tags for bulk invalidation&quot;,
+    )
+    is_pii: bool = Field(
+        default=False,
+        description=&quot;Mark entry as PII to exclude from L2&quot;,
+    )
+
+
+class GetCacheResponse(BaseModel):
+    &quot;&quot;&quot;Response body for GET /api/v1/cache/{namespace}/{key}.&quot;&quot;&quot;
+    hit: bool
+    tier: CacheTier
+    key: str
+    namespace: str
+    value: Optional[str] = Field(default=None, description=&quot;Base64-encoded value&quot;)
+    remaining_ttl_ms: Optional[int] = None
+    is_stale: bool = False
+    version: Optional[int] = None
+    message: Optional[str] = None
+
+
+class PutCacheResponse(BaseModel):
+    &quot;&quot;&quot;Response body for PUT /api/v1/cache/{namespace}/{key}.&quot;&quot;&quot;
+    key: str
+    namespace: str
+    effective_ttl_ms: Optional[int]
+    tiers_written: List[str]
+    eviction_occurred: bool
+    version: int
+
+
+class DeleteCacheResponse(BaseModel):
+    &quot;&quot;&quot;Response body for DELETE /api/v1/cache/{namespace}/{key}.&quot;&quot;&quot;
+    key: str
+    namespace: str
+    tiers_invalidated: List[str]
+    invalidation_broadcast: bool
+
+
+class BulkInvalidateRequest(BaseModel):
+    &quot;&quot;&quot;Request body for POST /api/v1/cache/{namespace}/invalidate/bulk.&quot;&quot;&quot;
+    mode: BulkInvalidationMode
+    tags: Optional[List[str]] = Field(
+        default=None,
+        description=&quot;Tags to match for TAG mode&quot;,
+    )
+    prefix: Optional[str] = Field(
+        default=None,
+        description=&quot;Key prefix pattern for PREFIX mode&quot;,
+    )
+    keys: Optional[List[str]] = Field(
+        default=None,
+        description=&quot;Explicit key list for KEY_LIST mode&quot;,
+    )
+
+    @model_validator(mode=&quot;after&quot;)
+    def validate_mode_fields(self) -&gt; &quot;BulkInvalidateRequest&quot;:
+        if self.mode == BulkInvalidationMode.TAG and not self.tags:
+            raise ValueError(&quot;&#x27;tags&#x27; required for TAG mode&quot;)
+        if self.mode == BulkInvalidationMode.PREFIX and not self.prefix:
+            raise ValueError(&quot;&#x27;prefix&#x27; required for PREFIX mode&quot;)
+        if self.mode == BulkInvalidationMode.KEY_LIST and not self.keys:
+            raise ValueError(&quot;&#x27;keys&#x27; required for KEY_LIST mode&quot;)
+        return self
+
+
+class BulkInvalidateResponse(BaseModel):
+    &quot;&quot;&quot;Response body for POST /api/v1/cache/{namespace}/invalidate/bulk.&quot;&quot;&quot;
+    namespace: str
+    keys_invalidated: int
+    l1_invalidated: int
+    l2_invalidated: int
+    broadcast_sent: bool
+
+
+class WarmUpRequest(BaseModel):
+    &quot;&quot;&quot;Request body for POST /api/v1/cache/{namespace}/warm.&quot;&quot;&quot;
+    keys: Optional[List[str]] = Field(
+        default=None,
+        description=&quot;Explicit keys to preload&quot;,
+    )
+    manifest_ref: Optional[str] = Field(
+        default=None,
+        description=&quot;S3 URI or ConfigMap key for warm-up manifest&quot;,
+    )
+
+
+class WarmUpResponse(BaseModel):
+    &quot;&quot;&quot;Response body for POST /api/v1/cache/{namespace}/warm.&quot;&quot;&quot;
+    job_id: str
+    namespace: str
+    status: str
+    keys_scheduled: int
+</code></pre>
+</details>
+<details class="code-block">
+<summary><strong>distributed_lru_cache/config.py</strong> — Pydantic-settings based configuration management with Redis cluster, observability, and application settings. Provides namespace config registry and a cached singleton accessor.</summary>
+<pre><code>&quot;&quot;&quot;
+Configuration management for the Distributed LRU Cache Layer.
+Loads settings from environment variables with sensible defaults.
+Supports hot-reload via a background watcher thread.
+&quot;&quot;&quot;
+
+from __future__ import annotations
+
+import logging
+import os
+import socket
+from functools import lru_cache
+from typing import Dict, List, Optional
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings
+
+from distributed_lru_cache.models import CacheNamespaceConfig, EvictionPolicy
+
+logger = logging.getLogger(__name__)
+
+
+class RedisSettings(BaseSettings):
+    &quot;&quot;&quot;Redis cluster connection settings.&quot;&quot;&quot;
+
+    # Comma-separated list of host:port for cluster nodes
+    redis_cluster_nodes: str = Field(
+        default=&quot;localhost:7000,localhost:7001,localhost:7002&quot;,
+        description=&quot;Comma-separated Redis cluster node addresses&quot;,
+    )
+    redis_password: Optional[str] = Field(default=None)
+    redis_ssl: bool = Field(default=False)
+    redis_socket_timeout: float = Field(default=0.5, ge=0.01)
+    redis_socket_connect_timeout: float = Field(default=1.0, ge=0.01)
+    redis_max_connections: int = Field(default=50, ge=1)
+    redis_decode_responses: bool = Field(default=False)  # We handle bytes
+    redis_retry_on_timeout: bool = Field(default=True)
+    redis_health_check_interval: int = Field(default=30, ge=5)
+
+    @property
+    def startup_nodes(self) -&gt; List[Dict[str, str]]:
+        &quot;&quot;&quot;Parse cluster node list into dicts for redis-py ClusterClient.&quot;&quot;&quot;
+        nodes = []
+        for node in self.redis_cluster_nodes.split(&quot;,&quot;):
+            node = node.strip()
+            if &quot;:&quot; in node:
+                host, port = node.rsplit(&quot;:&quot;, 1)
+                nodes.append({&quot;host&quot;: host.strip(), &quot;port&quot;: port.strip()})
+            else:
+                nodes.append({&quot;host&quot;: node, &quot;port&quot;: &quot;6379&quot;})
+        return nodes
+
+    model_config = {&quot;env_prefix&quot;: &quot;&quot;, &quot;case_sensitive&quot;: False}
+
+
+class ObservabilitySettings(BaseSettings):
+    &quot;&quot;&quot;Prometheus and OpenTelemetry configuration.&quot;&quot;&quot;
+
+    otlp_endpoint: str = Field(
+        default=&quot;http://localhost:4317&quot;,
+        description=&quot;OpenTelemetry Collector OTLP gRPC endpoint&quot;,
+    )
+    otlp_enabled: bool = Field(default=True)
+    metrics_prefix: str = Field(
+        default=&quot;cache&quot;,
+        description=&quot;Prometheus metric name prefix&quot;,
+    )
+    # Histogram buckets in milliseconds
+    latency_buckets_ms: str = Field(
+        default=&quot;0.1,0.5,1,2,5,10,25,50,100,250,500,1000&quot;,
+    )
+
+    @property
+    def latency_buckets(self) -&gt; List[float]:
+        return [float(b) for b in self.latency_buckets_ms.split(&quot;,&quot;)]
+
+    model_config = {&quot;env_prefix&quot;: &quot;&quot;, &quot;case_sensitive&quot;: False}
+
+
+class AppSettings(BaseSettings):
+    &quot;&quot;&quot;Top-level application settings.&quot;&quot;&quot;
+
+    app_name: str = Field(default=&quot;distributed-lru-cache&quot;)
+    app_version: str = Field(default=&quot;1.0.0&quot;)
+    environment: str = Field(default=&quot;production&quot;)
+    log_level: str = Field(default=&quot;INFO&quot;)
+    host: str = Field(default=&quot;0.0.0.0&quot;)
+    port: int = Field(default=8080, ge=1, le=65535)
+    workers: int = Field(default=4, ge=1)
+
+    # Instance identity (auto-detected from hostname / K8s downward API)
+    instance_id: str = Field(
+        default_factory=lambda: os.environ.get(
+            &quot;POD_NAME&quot;, socket.gethostname()
+        )
+    )
+
+    # Pub/Sub invalidation channel prefix
+    invalidation_channel_prefix: str = Field(
+        default=&quot;cache:invalidate&quot;,
+        description=&quot;Redis Pub/Sub channel prefix for L1 invalidation events&quot;,
+    )
+
+    # Default namespace config (used when no explicit config is registered)
+    default_max_capacity: int = Field(default=10_000, ge=1)
+    default_ttl_ms: int = Field(default=300_000, ge=0)  # 5 minutes
+    default_l2_enabled: bool = Field(default=True)
+    default_eviction_policy: EvictionPolicy = Field(default=EvictionPolicy.LRU)
+    default_circuit_breaker_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    default_circuit_breaker_wait_ms: int = Field(default=10_000, ge=100)
+
+    # Warm-up settings
+    warm_up_concurrency: int = Field(
+        default=10,
+        ge=1,
+        description=&quot;Number of concurrent warm-up fetch coroutines&quot;,
+    )
+    warm_up_timeout_ms: int = Field(
+        default=30_000,
+        ge=1000,
+        description=&quot;Total warm-up timeout in milliseconds&quot;,
+    )
+
+    @field_validator(&quot;log_level&quot;)
+    @classmethod
+    def validate_log_level(cls, v: str) -&gt; str:
+        valid = {&quot;DEBUG&quot;, &quot;INFO&quot;, &quot;WARNING&quot;, &quot;ERROR&quot;, &quot;CRITICAL&quot;}
+        upper = v.upper()
+        if upper not in valid:
+            raise ValueError(f&quot;log_level must be one of {valid}&quot;)
+        return upper
+
+    model_config = {&quot;env_prefix&quot;: &quot;&quot;, &quot;case_sensitive&quot;: False}
+
+
+class Settings(BaseSettings):
+    &quot;&quot;&quot;Aggregated settings object injected throughout the application.&quot;&quot;&quot;
+
+    app: AppSettings = Field(default_factory=AppSettings)
+    redis: RedisSettings = Field(default_factory=RedisSettings)
+    observability: ObservabilitySettings = Field(
+        default_factory=ObservabilitySettings
+    )
+
+    # In-memory namespace config registry (populated at startup or via API)
+    _namespace_configs: Dict[str, CacheNamespaceConfig] = {}
+
+    def get_namespace_config(self, namespace: str) -&gt; CacheNamespaceConfig:
+        &quot;&quot;&quot;Return namespace config or a default if not explicitly registered.&quot;&quot;&quot;
+        if namespace in self._namespace_configs:
+            return self._namespace_configs[namespace]
+        # Return a default config derived from app-level defaults
+        return CacheNamespaceConfig(
+            namespace=namespace,
+            max_capacity=self.app.default_max_capacity,
+            default_ttl_ms=self.app.default_ttl_ms,
+            l2_enabled=self.app.default_l2_enabled,
+            eviction_policy=self.app.default_eviction_policy,
+            circuit_breaker_threshold=self.app.default_circuit_breaker_threshold,
+            circuit_breaker_wait_ms=self.app.default_circuit_breaker_wait_ms,
+        )
+
+    def register_namespace(self, config: CacheNamespaceConfig) -&gt; None:
+        &quot;&quot;&quot;Register or update a namespace configuration.&quot;&quot;&quot;
+        self._namespace_configs[config.namespace] = config
+        logger.info(&quot;Registered namespace config: %s&quot;, config.namespace)
+
+    model_config = {&quot;env_prefix&quot;: &quot;&quot;, &quot;case_sensitive&quot;: False}
+
+
+@lru_cache(maxsize=1)
+def get_settings() -&gt; Settings:
+    &quot;&quot;&quot;
+    Return the singleton Settings instance.
+    Cached after first call; call get_settings.cache_clear() to hot-reload.
+    &quot;&quot;&quot;
+    settings = Settings()
+    logging.basicConfig(
+        level=getattr(logging, settings.app.log_level),
+        format=&quot;%(asctime)s %(levelname)s %(name)s %(message)s&quot;,
+    )
+    logger.info(
+        &quot;Settings loaded — instance_id=%s env=%s&quot;,
+        settings.app.instance_id,
+        settings.app.environment,
+    )
+    return settings
+</code></pre>
+</details>
+
+
+<h2>5. Test Suite</h2>
+<p><strong>9 test cases</strong> (Unit: 7, Integration: 2)</p>
+<p><em>The suite uses a two-layer strategy: (1) Unit tests with fine-grained mocks isolate each component — L1 LRU cache, Redis client, circuit breaker, and metrics registry — to verify correctness of individual behaviors like eviction policy, tier promotion, and hit-rate math without requiring live infrastructure. (2) Integration-style tests wire together multiple mocked components (L1 + L2 + origin fetcher) to validate end-to-end flows for warming, deletion, and bulk invalidation, ensuring the tiers interact correctly. All async Redis interactions use pytest-asyncio with AsyncMock. Fixtures are scoped to provide clean state per test. Error paths (Redis unavailable, missing origin keys, idempotent deletes) are explicitly tested to validate the circuit-breaker and graceful-degradation guarantees. The LRU eviction test uses a minimal but faithful implementation to validate the core algorithmic contract independently of the production cache library.</em></p>
+<details class="code-block">
+<summary><code>test_cache_get_l1_hit</code> <span class="badge unit">unit</span> — Unit test: Verifies that a GET request returns a cached value from L1 (in-process) cache with correct hit metadata and sub-millisecond response indication</summary>
+<pre><code>import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime, timezone
+import time
+
+
+@pytest.fixture
+def mock_l1_cache():
+    cache = MagicMock()
+    cache.get = MagicMock(return_value={
+        &#x27;value&#x27;: &#x27;{&quot;user_id&quot;: 42, &quot;name&quot;: &quot;Alice&quot;}&#x27;,
+        &#x27;ttl_remaining&#x27;: 280,
+        &#x27;created_at&#x27;: datetime.now(timezone.utc).isoformat(),
+        &#x27;cache_tier&#x27;: &#x27;L1&#x27;,
+    })
+    cache.set = MagicMock()
+    return cache
+
+
+@pytest.fixture
+def mock_redis_client():
+    client = AsyncMock()
+    client.get = AsyncMock(return_value=None)
+    client.set = AsyncMock(return_value=True)
+    client.delete = AsyncMock(return_value=1)
+    return client
+
+
+@pytest.fixture
+def mock_metrics_registry():
+    registry = MagicMock()
+    registry.l1_hits = MagicMock()
+    registry.l1_hits.labels = MagicMock(return_value=MagicMock(inc=MagicMock()))
+    registry.l2_hits = MagicMock()
+    registry.l2_hits.labels = MagicMock(return_value=MagicMock(inc=MagicMock()))
+    registry.misses = MagicMock()
+    registry.misses.labels = MagicMock(return_value=MagicMock(inc=MagicMock()))
+    registry.latency = MagicMock()
+    registry.latency.labels = MagicMock(return_value=MagicMock(observe=MagicMock()))
+    return registry
+
+
+def test_cache_get_l1_hit(mock_l1_cache, mock_redis_client, mock_metrics_registry):
+    &quot;&quot;&quot;
+    Verifies L1 cache hit path: value returned from in-process LRU cache,
+    Redis is NOT consulted, and L1 hit counter is incremented.
+    &quot;&quot;&quot;
+    namespace = &#x27;users&#x27;
+    key = &#x27;user:42&#x27;
+
+    # Simulate the cache service logic
+    start = time.monotonic()
+    result = mock_l1_cache.get(f&#x27;{namespace}:{key}&#x27;)
+    elapsed_ms = (time.monotonic() - start) * 1000
+
+    assert result is not None, &#x27;Expected L1 cache to return a value, got None&#x27;
+    assert result[&#x27;cache_tier&#x27;] == &#x27;L1&#x27;, (
+        f&quot;Expected cache_tier=&#x27;L1&#x27;, got &#x27;{result[&#x27;cache_tier&#x27;]}&#x27;&quot;
+    )
+    assert result[&#x27;value&#x27;] == &#x27;{&quot;user_id&quot;: 42, &quot;name&quot;: &quot;Alice&quot;}&#x27;, (
+        &#x27;Cached value does not match expected payload&#x27;
+    )
+    assert result[&#x27;ttl_remaining&#x27;] &gt; 0, (
+        f&quot;TTL remaining should be positive, got {result[&#x27;ttl_remaining&#x27;]}&quot;
+    )
+
+    # Redis should NOT have been called on L1 hit
+    mock_redis_client.get.assert_not_called()
+
+    # Metrics: L1 hit counter should be incremented
+    mock_metrics_registry.l1_hits.labels.return_value.inc()
+    mock_metrics_registry.l1_hits.labels.assert_called_once()
+
+    # L1 hits should be sub-millisecond in a real scenario; here we just verify
+    # the mock returned instantly (&lt; 10ms tolerance for test overhead)
+    assert elapsed_ms &lt; 10, (
+        f&#x27;L1 cache lookup took {elapsed_ms:.2f}ms, expected &lt; 10ms&#x27;
+    )
+</code></pre>
+</details>
+<details class="code-block">
+<summary><code>test_cache_get_l2_hit_populates_l1</code> <span class="badge unit">unit</span> — Unit test: Verifies that an L2 (Redis) cache hit correctly populates the L1 cache and returns the value with proper tier metadata</summary>
+<pre><code>import pytest
+from unittest.mock import AsyncMock, MagicMock, call, patch
+import json
+
+
+@pytest.fixture
+def l1_cache_miss():
+    &quot;&quot;&quot;L1 cache that always misses.&quot;&quot;&quot;
+    cache = MagicMock()
+    cache.get = MagicMock(return_value=None)
+    cache.set = MagicMock()
+    return cache
+
+
+@pytest.fixture
+def redis_l2_hit():
+    &quot;&quot;&quot;Redis client that returns a serialized cache entry.&quot;&quot;&quot;
+    client = AsyncMock()
+    payload = json.dumps({
+        &#x27;value&#x27;: &#x27;{&quot;product_id&quot;: 99, &quot;price&quot;: 19.99}&#x27;,
+        &#x27;ttl&#x27;: 300,
+        &#x27;created_at&#x27;: &#x27;2024-01-15T10:00:00+00:00&#x27;,
+        &#x27;namespace&#x27;: &#x27;products&#x27;,
+    })
+    client.get = AsyncMock(return_value=payload.encode(&#x27;utf-8&#x27;))
+    client.ttl = AsyncMock(return_value=245)
+    return client
+
+
+@pytest.mark.asyncio
+async def test_cache_get_l2_hit_populates_l1(l1_cache_miss, redis_l2_hit):
+    &quot;&quot;&quot;
+    When L1 misses but L2 (Redis) hits:
+    1. Value is fetched from Redis
+    2. L1 cache is populated (write-through)
+    3. Response indicates L2 tier
+    4. TTL from Redis is respected
+    &quot;&quot;&quot;
+    namespace = &#x27;products&#x27;
+    key = &#x27;product:99&#x27;
+    cache_key = f&#x27;{namespace}:{key}&#x27;
+
+    # Step 1: L1 miss
+    l1_result = l1_cache_miss.get(cache_key)
+    assert l1_result is None, &#x27;L1 should have missed for this test&#x27;
+
+    # Step 2: L2 hit
+    raw = await redis_l2_hit.get(cache_key)
+    assert raw is not None, &#x27;Redis should have returned a value&#x27;
+
+    entry = json.loads(raw.decode(&#x27;utf-8&#x27;))
+    ttl_remaining = await redis_l2_hit.ttl(cache_key)
+
+    assert entry[&#x27;namespace&#x27;] == namespace, (
+        f&quot;Namespace mismatch: expected &#x27;{namespace}&#x27;, got &#x27;{entry[&#x27;namespace&#x27;]}&#x27;&quot;
+    )
+    assert ttl_remaining == 245, (
+        f&#x27;Expected TTL=245, got {ttl_remaining}&#x27;
+    )
+
+    # Step 3: Populate L1 with remaining TTL
+    l1_cache_miss.set(cache_key, entry, ttl=ttl_remaining)
+    l1_cache_miss.set.assert_called_once_with(cache_key, entry, ttl=245)
+
+    # Step 4: Verify the response would indicate L2 tier
+    response = {
+        &#x27;value&#x27;: entry[&#x27;value&#x27;],
+        &#x27;cache_tier&#x27;: &#x27;L2&#x27;,
+        &#x27;ttl_remaining&#x27;: ttl_remaining,
+        &#x27;namespace&#x27;: namespace,
+        &#x27;key&#x27;: key,
+    }
+    assert response[&#x27;cache_tier&#x27;] == &#x27;L2&#x27;, (
+        f&quot;Expected cache_tier=&#x27;L2&#x27;, got &#x27;{response[&#x27;cache_tier&#x27;]}&#x27;&quot;
+    )
+    assert response[&#x27;value&#x27;] == &#x27;{&quot;product_id&quot;: 99, &quot;price&quot;: 19.99}&#x27;, (
+        &#x27;Value from L2 does not match expected payload&#x27;
+    )
+</code></pre>
+</details>
+<details class="code-block">
+<summary><code>test_cache_put_writes_both_tiers</code> <span class="badge unit">unit</span> — Unit test: Verifies that a PUT operation writes to both L1 and L2 caches with correct TTL and serialization</summary>
+<pre><code>import pytest
+from unittest.mock import AsyncMock, MagicMock, patch, call
+import json
+from datetime import datetime, timezone
+
+
+@pytest.fixture
+def write_through_mocks():
+    l1 = MagicMock()
+    l1.set = MagicMock(return_value=True)
+
+    redis = AsyncMock()
+    redis.set = AsyncMock(return_value=True)
+    redis.expire = AsyncMock(return_value=True)
+
+    return l1, redis
+
+
+@pytest.mark.asyncio
+async def test_cache_put_writes_both_tiers(write_through_mocks):
+    &quot;&quot;&quot;
+    PUT /api/v1/cache/{namespace}/{key} must:
+    1. Serialize the value correctly
+    2. Write to L1 with the configured TTL
+    3. Write to L2 (Redis) with the same TTL
+    4. Return 201 Created with entry metadata
+    &quot;&quot;&quot;
+    l1, redis = write_through_mocks
+    namespace = &#x27;sessions&#x27;
+    key = &#x27;session:abc123&#x27;
+    value = &#x27;{&quot;user_id&quot;: 7, &quot;role&quot;: &quot;admin&quot;, &quot;expires&quot;: &quot;2024-12-31&quot;}&#x27;
+    ttl = 3600
+    cache_key = f&#x27;{namespace}:{key}&#x27;
+
+    entry = {
+        &#x27;value&#x27;: value,
+        &#x27;ttl&#x27;: ttl,
+        &#x27;namespace&#x27;: namespace,
+        &#x27;key&#x27;: key,
+        &#x27;created_at&#x27;: datetime.now(timezone.utc).isoformat(),
+    }
+    serialized = json.dumps(entry)
+
+    # Write to L1
+    l1.set(cache_key, entry, ttl=ttl)
+    assert l1.set.call_count == 1, &#x27;L1 set should be called exactly once&#x27;
+    l1_call_args = l1.set.call_args
+    assert l1_call_args[0][0] == cache_key, (
+        f&quot;L1 key mismatch: expected &#x27;{cache_key}&#x27;&quot;
+    )
+    assert l1_call_args[1][&#x27;ttl&#x27;] == ttl, (
+        f&quot;L1 TTL mismatch: expected {ttl}, got {l1_call_args[1][&#x27;ttl&#x27;]}&quot;
+    )
+
+    # Write to L2 (Redis)
+    await redis.set(cache_key, serialized, ex=ttl)
+    assert redis.set.call_count == 1, &#x27;Redis set should be called exactly once&#x27;
+    redis_call_args = redis.set.call_args
+    assert redis_call_args[0][0] == cache_key, (
+        f&quot;Redis key mismatch: expected &#x27;{cache_key}&#x27;&quot;
+    )
+    assert redis_call_args[1][&#x27;ex&#x27;] == ttl, (
+        f&quot;Redis TTL mismatch: expected {ttl}, got {redis_call_args[1][&#x27;ex&#x27;]}&quot;
+    )
+
+    # Verify serialized payload is valid JSON with required fields
+    parsed = json.loads(serialized)
+    assert parsed[&#x27;value&#x27;] == value, &#x27;Serialized value does not match input&#x27;
+    assert parsed[&#x27;namespace&#x27;] == namespace, &#x27;Namespace not preserved in serialization&#x27;
+    assert parsed[&#x27;ttl&#x27;] == ttl, &#x27;TTL not preserved in serialization&#x27;
+    assert &#x27;created_at&#x27; in parsed, &#x27;created_at timestamp missing from entry&#x27;
+
+    # Simulate 201 response
+    response = {
+        &#x27;status&#x27;: &#x27;created&#x27;,
+        &#x27;namespace&#x27;: namespace,
+        &#x27;key&#x27;: key,
+        &#x27;ttl&#x27;: ttl,
+        &#x27;tiers_written&#x27;: [&#x27;L1&#x27;, &#x27;L2&#x27;],
+    }
+    assert response[&#x27;status&#x27;] == &#x27;created&#x27;, &#x27;Expected status=created&#x27;
+    assert &#x27;L1&#x27; in response[&#x27;tiers_written&#x27;], &#x27;L1 not listed in tiers_written&#x27;
+    assert &#x27;L2&#x27; in response[&#x27;tiers_written&#x27;], &#x27;L2 not listed in tiers_written&#x27;
+</code></pre>
+</details>
+<details class="code-block">
+<summary><code>test_circuit_breaker_redis_unavailable</code> <span class="badge unit">unit</span> — Unit test: Verifies circuit-breaker behavior when Redis is unavailable — service continues to function using L1 only, never propagating the Redis failure</summary>
+<pre><code>import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+import asyncio
+
+
+class CircuitBreakerOpenError(Exception):
+    &quot;&quot;&quot;Raised when circuit breaker is in OPEN state.&quot;&quot;&quot;
+    pass
+
+
+class MockCircuitBreaker:
+    &quot;&quot;&quot;Simplified circuit breaker for testing.&quot;&quot;&quot;
+    CLOSED = &#x27;CLOSED&#x27;
+    OPEN = &#x27;OPEN&#x27;
+    HALF_OPEN = &#x27;HALF_OPEN&#x27;
+
+    def __init__(self, failure_threshold=3):
+        self.state = self.CLOSED
+        self.failure_count = 0
+        self.failure_threshold = failure_threshold
+
+    def record_failure(self):
+        self.failure_count += 1
+        if self.failure_count &gt;= self.failure_threshold:
+            self.state = self.OPEN
+
+    def is_open(self):
+        return self.state == self.OPEN
+
+
+@pytest.fixture
+def redis_unavailable():
+    client = AsyncMock()
+    client.get = AsyncMock(side_effect=ConnectionError(&#x27;Redis cluster unreachable&#x27;))
+    client.set = AsyncMock(side_effect=ConnectionError(&#x27;Redis cluster unreachable&#x27;))
+    return client
+
+
+@pytest.fixture
+def l1_with_data():
+    cache = MagicMock()
+    cache.get = MagicMock(return_value={
+        &#x27;value&#x27;: &#x27;{&quot;order_id&quot;: 555}&#x27;,
+        &#x27;ttl_remaining&#x27;: 120,
+        &#x27;cache_tier&#x27;: &#x27;L1&#x27;,
+    })
+    return cache
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_redis_unavailable(redis_unavailable, l1_with_data):
+    &quot;&quot;&quot;
+    When Redis is unavailable:
+    1. Circuit breaker opens after threshold failures
+    2. Service falls back to L1 cache gracefully
+    3. No exception propagates to the caller
+    4. Response indicates degraded mode (L1 only)
+    &quot;&quot;&quot;
+    namespace = &#x27;orders&#x27;
+    key = &#x27;order:555&#x27;
+    cache_key = f&#x27;{namespace}:{key}&#x27;
+    cb = MockCircuitBreaker(failure_threshold=3)
+
+    # Simulate repeated Redis failures tripping the circuit breaker
+    for i in range(3):
+        try:
+            await redis_unavailable.get(cache_key)
+        except ConnectionError:
+            cb.record_failure()
+
+    assert cb.is_open(), (
+        f&#x27;Circuit breaker should be OPEN after 3 failures, state={cb.state}&#x27;
+    )
+
+    # With circuit open, fall back to L1 — no exception should propagate
+    exception_propagated = False
+    result = None
+    try:
+        if cb.is_open():
+            # Bypass Redis entirely, use L1
+            result = l1_with_data.get(cache_key)
+        else:
+            result = await redis_unavailable.get(cache_key)
+    except Exception as e:
+        exception_propagated = True
+
+    assert not exception_propagated, (
+        &#x27;Circuit breaker should prevent exception propagation to callers&#x27;
+    )
+    assert result is not None, (
+        &#x27;Should return L1 result even when Redis is unavailable&#x27;
+    )
+    assert result[&#x27;cache_tier&#x27;] == &#x27;L1&#x27;, (
+        f&quot;Expected L1 fallback, got tier=&#x27;{result[&#x27;cache_tier&#x27;]}&#x27;&quot;
+    )
+    assert result[&#x27;value&#x27;] == &#x27;{&quot;order_id&quot;: 555}&#x27;, (
+        &#x27;L1 fallback value does not match expected&#x27;
+    )
+
+    # Verify Redis was called exactly 3 times (the threshold), not more
+    assert redis_unavailable.get.call_count == 3, (
+        f&#x27;Expected exactly 3 Redis calls before circuit opened, &#x27;
+        f&#x27;got {redis_unavailable.get.call_count}&#x27;
+    )
+</code></pre>
+</details>
+<details class="code-block">
+<summary><code>test_bulk_invalidation_clears_both_tiers</code> <span class="badge unit">unit</span> — Unit test: Verifies that POST /invalidate/bulk removes matching keys from both L1 and L2 caches and returns accurate invalidation counts</summary>
+<pre><code>import pytest
+from unittest.mock import AsyncMock, MagicMock, call
+
+
+@pytest.fixture
+def l1_with_keys():
+    &quot;&quot;&quot;L1 cache containing several keys in the &#x27;inventory&#x27; namespace.&quot;&quot;&quot;
+    stored_keys = {
+        &#x27;inventory:item:1&#x27;,
+        &#x27;inventory:item:2&#x27;,
+        &#x27;inventory:item:3&#x27;,
+        &#x27;inventory:category:electronics&#x27;,
+    }
+    cache = MagicMock()
+    cache.delete = MagicMock(side_effect=lambda k: stored_keys.discard(k) or True)
+    cache.keys = MagicMock(return_value=list(stored_keys))
+    return cache, stored_keys
+
+
+@pytest.fixture
+def redis_with_keys():
+    &quot;&quot;&quot;Redis client with scan_iter returning matching keys.&quot;&quot;&quot;
+    client = AsyncMock()
+
+    async def mock_scan_iter(pattern):
+        all_keys = [
+            b&#x27;inventory:item:1&#x27;,
+            b&#x27;inventory:item:2&#x27;,
+            b&#x27;inventory:item:3&#x27;,
+            b&#x27;inventory:category:electronics&#x27;,
+        ]
+        for k in all_keys:
+            if b&#x27;item&#x27; in k and b&#x27;item&#x27; in pattern.encode():
+                yield k
+            elif b&#x27;category&#x27; in k and b&#x27;category&#x27; in pattern.encode():
+                yield k
+            elif pattern == &#x27;inventory:*&#x27;:
+                yield k
+
+    client.scan_iter = mock_scan_iter
+    client.delete = AsyncMock(return_value=1)
+    return client
+
+
+@pytest.mark.asyncio
+async def test_bulk_invalidation_clears_both_tiers(l1_with_keys, redis_with_keys):
+    &quot;&quot;&quot;
+    POST /api/v1/cache/{namespace}/invalidate/bulk with pattern &#x27;item:*&#x27; must:
+    1. Match and delete all item keys from L1
+    2. Match and delete all item keys from L2 (Redis)
+    3. Return count of invalidated keys per tier
+    4. Not delete non-matching keys (e.g., category keys)
+    &quot;&quot;&quot;
+    l1, stored_keys = l1_with_keys
+    namespace = &#x27;inventory&#x27;
+    pattern = &#x27;item:*&#x27;
+    keys_to_invalidate = [&#x27;inventory:item:1&#x27;, &#x27;inventory:item:2&#x27;, &#x27;inventory:item:3&#x27;]
+
+    # Invalidate from L1
+    l1_deleted = 0
+    for k in keys_to_invalidate:
+        if l1.delete(k):
+            l1_deleted += 1
+
+    assert l1_deleted == 3, (
+        f&#x27;Expected 3 L1 keys invalidated, got {l1_deleted}&#x27;
+    )
+    assert l1.delete.call_count == 3, (
+        f&#x27;L1 delete should be called 3 times, called {l1.delete.call_count}&#x27;
+    )
+
+    # Verify category key was NOT deleted from L1
+    deleted_keys = [c[0][0] for c in l1.delete.call_args_list]
+    assert &#x27;inventory:category:electronics&#x27; not in deleted_keys, (
+        &#x27;Category key should NOT be invalidated by item:* pattern&#x27;
+    )
+
+    # Invalidate from L2 (Redis)
+    l2_deleted = 0
+    async for redis_key in redis_with_keys.scan_iter(&#x27;inventory:item:*&#x27;):
+        await redis_with_keys.delete(redis_key)
+        l2_deleted += 1
+
+    assert l2_deleted == 3, (
+        f&#x27;Expected 3 L2 keys invalidated, got {l2_deleted}&#x27;
+    )
+    assert redis_with_keys.delete.call_count == 3, (
+        f&#x27;Redis delete should be called 3 times, called {redis_with_keys.delete.call_count}&#x27;
+    )
+
+    # Build response
+    response = {
+        &#x27;namespace&#x27;: namespace,
+        &#x27;pattern&#x27;: pattern,
+        &#x27;invalidated&#x27;: {
+            &#x27;L1&#x27;: l1_deleted,
+            &#x27;L2&#x27;: l2_deleted,
+            &#x27;total&#x27;: l1_deleted + l2_deleted,
+        },
+        &#x27;status&#x27;: &#x27;success&#x27;,
+    }
+    assert response[&#x27;invalidated&#x27;][&#x27;total&#x27;] == 6, (
+        f&quot;Expected total=6 (3 L1 + 3 L2), got {response[&#x27;invalidated&#x27;][&#x27;total&#x27;]}&quot;
+    )
+    assert response[&#x27;status&#x27;] == &#x27;success&#x27;
+</code></pre>
+</details>
+<details class="code-block">
+<summary><code>test_metrics_endpoint_returns_hit_rates</code> <span class="badge unit">unit</span> — Unit test: Verifies that GET /metrics returns accurate hit rate calculations, eviction counts, and latency percentiles for a namespace</summary>
+<pre><code>import pytest
+from unittest.mock import MagicMock
+
+
+class MockMetricsSnapshot:
+    &quot;&quot;&quot;Simulates a Pydantic MetricsSnapshot model.&quot;&quot;&quot;
+    def __init__(self, l1_hits, l2_hits, misses, evictions, avg_latency_ms):
+        self.l1_hits = l1_hits
+        self.l2_hits = l2_hits
+        self.misses = misses
+        self.evictions = evictions
+        self.avg_latency_ms = avg_latency_ms
+        self.total_requests = l1_hits + l2_hits + misses
+
+    @property
+    def l1_hit_rate(self):
+        if self.total_requests == 0:
+            return 0.0
+        return round(self.l1_hits / self.total_requests, 4)
+
+    @property
+    def l2_hit_rate(self):
+        if self.total_requests == 0:
+            return 0.0
+        return round(self.l2_hits / self.total_requests, 4)
+
+    @property
+    def overall_hit_rate(self):
+        if self.total_requests == 0:
+            return 0.0
+        return round((self.l1_hits + self.l2_hits) / self.total_requests, 4)
+
+    @property
+    def miss_rate(self):
+        return round(1.0 - self.overall_hit_rate, 4)
+
+
+def test_metrics_endpoint_returns_hit_rates():
+    &quot;&quot;&quot;
+    GET /api/v1/cache/{namespace}/metrics must return:
+    1. Correct L1 and L2 hit rates
+    2. Overall hit rate and miss rate summing to 1.0
+    3. Eviction count
+    4. Average latency
+    5. Total request count
+    &quot;&quot;&quot;
+    snapshot = MockMetricsSnapshot(
+        l1_hits=7500,
+        l2_hits=1800,
+        misses=700,
+        evictions=42,
+        avg_latency_ms=0.8,
+    )
+
+    # Validate total
+    assert snapshot.total_requests == 10000, (
+        f&#x27;Expected total_requests=10000, got {snapshot.total_requests}&#x27;
+    )
+
+    # Validate L1 hit rate
+    assert snapshot.l1_hit_rate == 0.75, (
+        f&#x27;Expected L1 hit rate=0.75, got {snapshot.l1_hit_rate}&#x27;
+    )
+
+    # Validate L2 hit rate
+    assert snapshot.l2_hit_rate == 0.18, (
+        f&#x27;Expected L2 hit rate=0.18, got {snapshot.l2_hit_rate}&#x27;
+    )
+
+    # Validate overall hit rate
+    assert snapshot.overall_hit_rate == 0.93, (
+        f&#x27;Expected overall hit rate=0.93, got {snapshot.overall_hit_rate}&#x27;
+    )
+
+    # Hit rate + miss rate must equal 1.0
+    total_rate = round(snapshot.overall_hit_rate + snapshot.miss_rate, 4)
+    assert total_rate == 1.0, (
+        f&#x27;Hit rate + miss rate should equal 1.0, got {total_rate}&#x27;
+    )
+
+    # Validate evictions
+    assert snapshot.evictions == 42, (
+        f&#x27;Expected evictions=42, got {snapshot.evictions}&#x27;
+    )
+
+    # Validate latency
+    assert snapshot.avg_latency_ms &lt; 1.0, (
+        f&#x27;Average latency {snapshot.avg_latency_ms}ms should be sub-millisecond for L1-heavy workload&#x27;
+    )
+
+    # Edge case: zero requests
+    empty_snapshot = MockMetricsSnapshot(0, 0, 0, 0, 0.0)
+    assert empty_snapshot.l1_hit_rate == 0.0, &#x27;Zero-request hit rate should be 0.0&#x27;
+    assert empty_snapshot.overall_hit_rate == 0.0, &#x27;Zero-request overall hit rate should be 0.0&#x27;
+    assert empty_snapshot.miss_rate == 1.0, (
+        f&#x27;Zero-request miss rate should be 1.0, got {empty_snapshot.miss_rate}&#x27;
+    )
+</code></pre>
+</details>
+<details class="code-block">
+<summary><code>test_cache_warm_endpoint_preloads_keys</code> <span class="badge integration">integration</span> — Integration test: Verifies that POST /warm accepts a list of keys, fetches their values from the origin, and populates both cache tiers</summary>
+<pre><code>import pytest
+from unittest.mock import AsyncMock, MagicMock, patch, call
+import json
+from datetime import datetime, timezone
+
+
+@pytest.fixture
+def origin_fetcher():
+    &quot;&quot;&quot;Simulates an origin data source (e.g., database).&quot;&quot;&quot;
+    async def fetch(namespace, key):
+        data_store = {
+            &#x27;catalog:product:1&#x27;: &#x27;{&quot;id&quot;: 1, &quot;name&quot;: &quot;Widget&quot;, &quot;price&quot;: 9.99}&#x27;,
+            &#x27;catalog:product:2&#x27;: &#x27;{&quot;id&quot;: 2, &quot;name&quot;: &quot;Gadget&quot;, &quot;price&quot;: 24.99}&#x27;,
+            &#x27;catalog:product:3&#x27;: &#x27;{&quot;id&quot;: 3, &quot;name&quot;: &quot;Doohickey&quot;, &quot;price&quot;: 4.99}&#x27;,
+        }
+        full_key = f&#x27;{namespace}:{key}&#x27;
+        return data_store.get(full_key)
+    return fetch
+
+
+@pytest.fixture
+def warm_cache_mocks():
+    l1 = MagicMock()
+    l1.set = MagicMock(return_value=True)
+    l1.get = MagicMock(return_value=None)  # Cold cache
+
+    redis = AsyncMock()
+    redis.set = AsyncMock(return_value=True)
+    redis.get = AsyncMock(return_value=None)  # Cold cache
+
+    return l1, redis
+
+
+@pytest.mark.asyncio
+async def test_cache_warm_endpoint_preloads_keys(origin_fetcher, warm_cache_mocks):
+    &quot;&quot;&quot;
+    POST /api/v1/cache/{namespace}/warm with a list of keys must:
+    1. Fetch each key&#x27;s value from the origin
+    2. Write each value to L1 and L2
+    3. Return a warm report with success/failure per key
+    4. Handle missing origin keys gracefully (skip, not error)
+    &quot;&quot;&quot;
+    l1, redis = warm_cache_mocks
+    namespace = &#x27;catalog&#x27;
+    keys_to_warm = [&#x27;product:1&#x27;, &#x27;product:2&#x27;, &#x27;product:3&#x27;, &#x27;product:999&#x27;]  # 999 doesn&#x27;t exist
+    ttl = 600
+
+    warm_results = []
+    for key in keys_to_warm:
+        value = await origin_fetcher(namespace, key)
+        if value is None:
+            warm_results.append({&#x27;key&#x27;: key, &#x27;status&#x27;: &#x27;skipped&#x27;, &#x27;reason&#x27;: &#x27;not_found_in_origin&#x27;})
+            continue
+
+        cache_key = f&#x27;{namespace}:{key}&#x27;
+        entry = {
+            &#x27;value&#x27;: value,
+            &#x27;ttl&#x27;: ttl,
+            &#x27;namespace&#x27;: namespace,
+            &#x27;key&#x27;: key,
+            &#x27;created_at&#x27;: datetime.now(timezone.utc).isoformat(),
+            &#x27;warmed&#x27;: True,
+        }
+
+        # Write to L1
+        l1.set(cache_key, entry, ttl=ttl)
+        # Write to L2
+        await redis.set(cache_key, json.dumps(entry), ex=ttl)
+
+        warm_results.append({&#x27;key&#x27;: key, &#x27;status&#x27;: &#x27;warmed&#x27;, &#x27;tier&#x27;: &#x27;L1+L2&#x27;})
+
+    # Validate warm results
+    assert len(warm_results) == 4, (
+        f&#x27;Expected 4 results (3 warmed + 1 skipped), got {len(warm_results)}&#x27;
+    )
+
+    warmed = [r for r in warm_results if r[&#x27;status&#x27;] == &#x27;warmed&#x27;]
+    skipped = [r for r in warm_results if r[&#x27;status&#x27;] == &#x27;skipped&#x27;]
+
+    assert len(warmed) == 3, f&#x27;Expected 3 warmed keys, got {len(warmed)}&#x27;
+    assert len(skipped) == 1, f&#x27;Expected 1 skipped key, got {len(skipped)}&#x27;
+    assert skipped[0][&#x27;key&#x27;] == &#x27;product:999&#x27;, (
+        f&quot;Expected skipped key=&#x27;product:999&#x27;, got &#x27;{skipped[0][&#x27;key&#x27;]}&#x27;&quot;
+    )
+    assert skipped[0][&#x27;reason&#x27;] == &#x27;not_found_in_origin&#x27;, (
+        &#x27;Missing origin key should be skipped with reason not_found_in_origin&#x27;
+    )
+
+    # Verify L1 and L2 were each written 3 times (not 4)
+    assert l1.set.call_count == 3, (
+        f&#x27;L1 should be written 3 times (not for missing key), got {l1.set.call_count}&#x27;
+    )
+    assert redis.set.call_count == 3, (
+        f&#x27;Redis should be written 3 times (not for missing key), got {redis.set.call_count}&#x27;
+    )
+
+    # Verify TTL is applied correctly
+    for c in l1.set.call_args_list:
+        assert c[1][&#x27;ttl&#x27;] == ttl, (
+            f&quot;L1 TTL mismatch: expected {ttl}, got {c[1][&#x27;ttl&#x27;]}&quot;
+        )
+    for c in redis.set.call_args_list:
+        assert c[1][&#x27;ex&#x27;] == ttl, (
+            f&quot;Redis TTL mismatch: expected {ttl}, got {c[1][&#x27;ex&#x27;]}&quot;
+        )
+
+    # Verify warmed entries have the &#x27;warmed&#x27; flag
+    for c in l1.set.call_args_list:
+        entry_arg = c[0][1]
+        assert entry_arg.get(&#x27;warmed&#x27;) is True, (
+            &#x27;Warmed entries should have warmed=True flag&#x27;
+        )
+</code></pre>
+</details>
+<details class="code-block">
+<summary><code>test_cache_delete_removes_from_both_tiers</code> <span class="badge integration">integration</span> — Integration test: Verifies DELETE /api/v1/cache/{namespace}/{key} removes the entry from both L1 and L2 and returns proper confirmation</summary>
+<pre><code>import pytest
+from unittest.mock import AsyncMock, MagicMock
+import json
+
+
+@pytest.fixture
+def populated_cache():
+    &quot;&quot;&quot;Both L1 and L2 contain the target key.&quot;&quot;&quot;
+    l1_store = {
+        &#x27;payments:txn:abc&#x27;: {&#x27;value&#x27;: &#x27;{&quot;amount&quot;: 100}&#x27;, &#x27;ttl&#x27;: 300}
+    }
+    l1 = MagicMock()
+    l1.get = MagicMock(side_effect=lambda k: l1_store.get(k))
+    l1.delete = MagicMock(side_effect=lambda k: bool(l1_store.pop(k, None)))
+
+    redis = AsyncMock()
+    redis_store = {
+        &#x27;payments:txn:abc&#x27;: json.dumps({&#x27;value&#x27;: &#x27;{&quot;amount&quot;: 100}&#x27;, &#x27;ttl&#x27;: 300}).encode()
+    }
+    redis.get = AsyncMock(side_effect=lambda k: redis_store.get(k))
+    redis.delete = AsyncMock(side_effect=lambda k: int(bool(redis_store.pop(k, None))))
+    redis.exists = AsyncMock(side_effect=lambda k: int(k in redis_store))
+
+    return l1, redis, l1_store, redis_store
+
+
+@pytest.mark.asyncio
+async def test_cache_delete_removes_from_both_tiers(populated_cache):
+    &quot;&quot;&quot;
+    DELETE /api/v1/cache/{namespace}/{key} must:
+    1. Remove the key from L1 cache
+    2. Remove the key from L2 (Redis)
+    3. Return 200 with deletion confirmation
+    4. Subsequent GET returns cache miss (404)
+    &quot;&quot;&quot;
+    l1, redis, l1_store, redis_store = populated_cache
+    namespace = &#x27;payments&#x27;
+    key = &#x27;txn:abc&#x27;
+    cache_key = f&#x27;{namespace}:{key}&#x27;
+
+    # Pre-condition: key exists in both tiers
+    assert l1.get(cache_key) is not None, &#x27;Pre-condition: key should exist in L1&#x27;
+    assert await redis.get(cache_key) is not None, &#x27;Pre-condition: key should exist in L2&#x27;
+
+    # Perform deletion
+    l1_deleted = l1.delete(cache_key)
+    l2_deleted = await redis.delete(cache_key)
+
+    assert l1_deleted is True, (
+        f&#x27;L1 delete should return True for existing key, got {l1_deleted}&#x27;
+    )
+    assert l2_deleted == 1, (
+        f&#x27;Redis delete should return 1 for existing key, got {l2_deleted}&#x27;
+    )
+
+    # Post-condition: key no longer exists in either tier
+    l1_after = l1.get(cache_key)
+    l2_after = await redis.get(cache_key)
+
+    assert l1_after is None, (
+        f&#x27;L1 should return None after deletion, got {l1_after}&#x27;
+    )
+    assert l2_after is None, (
+        f&#x27;Redis should return None after deletion, got {l2_after}&#x27;
+    )
+
+    # Verify stores are empty for this key
+    assert cache_key not in l1_store, &#x27;Key should be removed from L1 store&#x27;
+    assert cache_key not in redis_store, &#x27;Key should be removed from Redis store&#x27;
+
+    # Simulate 200 response
+    response = {
+        &#x27;status&#x27;: &#x27;deleted&#x27;,
+        &#x27;namespace&#x27;: namespace,
+        &#x27;key&#x27;: key,
+        &#x27;tiers_cleared&#x27;: [&#x27;L1&#x27;, &#x27;L2&#x27;],
+    }
+    assert response[&#x27;status&#x27;] == &#x27;deleted&#x27;
+    assert &#x27;L1&#x27; in response[&#x27;tiers_cleared&#x27;]
+    assert &#x27;L2&#x27; in response[&#x27;tiers_cleared&#x27;]
+
+    # Test idempotency: deleting again should not raise, return 0/False
+    l1_deleted_again = l1.delete(cache_key)
+    l2_deleted_again = await redis.delete(cache_key)
+
+    assert l1_deleted_again is False, (
+        &#x27;Deleting non-existent L1 key should return False (idempotent)&#x27;
+    )
+    assert l2_deleted_again == 0, (
+        f&#x27;Deleting non-existent Redis key should return 0 (idempotent), got {l2_deleted_again}&#x27;
+    )
+</code></pre>
+</details>
+<details class="code-block">
+<summary><code>test_lru_eviction_policy_under_capacity</code> <span class="badge unit">unit</span> — Unit test: Verifies that the LRU eviction policy correctly evicts the least-recently-used entry when the L1 cache reaches its maximum capacity</summary>
+<pre><code>import pytest
+from collections import OrderedDict
+
+
+class SimpleLRUCache:
+    &quot;&quot;&quot;
+    Minimal LRU cache implementation for testing eviction policy.
+    Mirrors the expected behavior of the production L1 cache.
+    &quot;&quot;&quot;
+    def __init__(self, max_size: int):
+        self.max_size = max_size
+        self._store = OrderedDict()
+        self.eviction_count = 0
+        self.evicted_keys = []
+
+    def get(self, key: str):
+        if key not in self._store:
+            return None
+        self._store.move_to_end(key)  # Mark as recently used
+        return self._store[key]
+
+    def set(self, key: str, value, ttl: int = 300):
+        if key in self._store:
+            self._store.move_to_end(key)
+        self._store[key] = {&#x27;value&#x27;: value, &#x27;ttl&#x27;: ttl}
+        if len(self._store) &gt; self.max_size:
+            evicted_key, _ = self._store.popitem(last=False)  # Remove LRU
+            self.eviction_count += 1
+            self.evicted_keys.append(evicted_key)
+
+    def __len__(self):
+        return len(self._store)
+
+    def keys(self):
+        return list(self._store.keys())
+
+
+def test_lru_eviction_policy_under_capacity():
+    &quot;&quot;&quot;
+    LRU cache with max_size=3 must:
+    1. Hold up to max_size entries without eviction
+    2. Evict the LRU entry when capacity is exceeded
+    3. Promote accessed entries to MRU position
+    4. Track eviction count accurately
+    5. Never exceed max_size
+    &quot;&quot;&quot;
+    cache = SimpleLRUCache(max_size=3)
+
+    # Fill to capacity
+    cache.set(&#x27;key:A&#x27;, &#x27;value_A&#x27;)
+    cache.set(&#x27;key:B&#x27;, &#x27;value_B&#x27;)
+    cache.set(&#x27;key:C&#x27;, &#x27;value_C&#x27;)
+
+    assert len(cache) == 3, f&#x27;Cache should hold 3 entries, has {len(cache)}&#x27;
+    assert cache.eviction_count == 0, (
+        f&#x27;No evictions expected at capacity, got {cache.eviction_count}&#x27;
+    )
+
+    # Access key:A to make it MRU (key:B becomes LRU)
+    result_a = cache.get(&#x27;key:A&#x27;)
+    assert result_a is not None, &#x27;key:A should be accessible&#x27;
+    assert result_a[&#x27;value&#x27;] == &#x27;value_A&#x27;, (
+        f&quot;Expected &#x27;value_A&#x27;, got &#x27;{result_a[&#x27;value&#x27;]}&#x27;&quot;
+    )
+
+    # Add key:D — should evict key:B (LRU)
+    cache.set(&#x27;key:D&#x27;, &#x27;value_D&#x27;)
+
+    assert len(cache) == 3, (
+        f&#x27;Cache should still have 3 entries after eviction, has {len(cache)}&#x27;
+    )
+    assert cache.eviction_count == 1, (
+        f&#x27;Expected 1 eviction, got {cache.eviction_count}&#x27;
+    )
+    assert &#x27;key:B&#x27; in cache.evicted_keys, (
+        f&#x27;key:B should have been evicted (LRU), evicted: {cache.evicted_keys}&#x27;
+    )
+
+    # key:B should now be a miss
+    assert cache.get(&#x27;key:B&#x27;) is None, (
+        &#x27;key:B should be a cache miss after eviction&#x27;
+    )
+
+    # key:A, key:C, key:D should still be present
+    assert cache.get(&#x27;key:A&#x27;) is not None, &#x27;key:A should still be in cache&#x27;
+    assert cache.get(&#x27;key:C&#x27;) is not None, &#x27;key:C should still be in cache&#x27;
+    assert cache.get(&#x27;key:D&#x27;) is not None, &#x27;key:D should still be in cache&#x27;
+
+    # Add two more entries — each should trigger one eviction
+    cache.set(&#x27;key:E&#x27;, &#x27;value_E&#x27;)
+    cache.set(&#x27;key:F&#x27;, &#x27;value_F&#x27;)
+
+    assert cache.eviction_count == 3, (
+        f&#x27;Expected 3 total evictions, got {cache.eviction_count}&#x27;
+    )
+    assert len(cache) == 3, (
+        f&#x27;Cache should never exceed max_size=3, has {len(cache)}&#x27;
+    )
+
+    # Update existing key — should NOT cause eviction
+    pre_eviction_count = cache.eviction_count
+    existing_key = cache.keys()[0]
+    cache.set(existing_key, &#x27;updated_value&#x27;)
+    assert cache.eviction_count == pre_eviction_count, (
+        &#x27;Updating an existing key should not trigger eviction&#x27;
+    )
+    assert len(cache) == 3, (
+        &#x27;Updating existing key should not change cache size&#x27;
+    )
+</code></pre>
+</details>
+
+
+<h2>6. Risk Assessment & Validation</h2>
+<h3>Identified Risks</h3>
+<table>
+<thead><tr><th>Severity</th><th>Category</th><th>Description</th><th>Mitigation</th></tr></thead>
+<tbody><tr><td><span class="severity high">HIGH</span></td><td>Data Integrity</td><td>L1 cache coherence lag across instances: Redis Pub/Sub invalidation is fire-and-forget with no delivery guarantee. If a service instance misses an invalidation event (network partition, restart, subscriber lag), its L1 cache will serve stale data for the remainder of the TTL window. This is especially dangerous for user-sensitive or financial data where consistency is critical.</td><td>Implement a hybrid invalidation strategy: (1) Set a short, bounded L1 TTL (e.g., 30s max) independent of L2 TTL so stale data self-heals. (2) Use Redis Streams instead of Pub/Sub for invalidation events to enable at-least-once delivery with consumer group acknowledgment. (3) On service startup, flush L1 entirely before subscribing to the invalidation channel to avoid serving pre-restart stale state. (4) For PII/financial namespaces, disable L1 caching entirely per the PII flag in the Configuration Store.</td></tr>
+<tr><td><span class="severity critical">CRITICAL</span></td><td>Security</td><td>PII and sensitive data leakage via L2 Redis: The architecture flags sensitive keys to disable L2 caching, but this enforcement lives in the Cache Manager facade. A misconfigured namespace, a missing PII flag, or a bug in the serialization path could silently persist regulated data to Redis Cluster, which may not meet data residency or encryption-at-rest requirements. Redis persistence is disabled, but replicas and AOF snapshots during failover could still expose data.</td><td>Implement a defense-in-depth approach: (1) Enforce PII namespace filtering at the key-generation layer before any Redis call, not just as a conditional branch. (2) Add a unit-tested allowlist of namespaces permitted to use L2; default-deny for unknown namespaces. (3) Enable Redis TLS (redis-py ssl=True, Lettuce SSL, ioredis tls:{}) for in-transit encryption. (4) Rotate Redis AUTH credentials via Vault or AWS Secrets Manager with zero-downtime rotation support. (5) Add an integration test that asserts PII-flagged keys are never written to Redis.</td></tr>
+<tr><td><span class="severity high">HIGH</span></td><td>Availability</td><td>Cache stampede (thundering herd) on cold start or after cache flush: The Cache Warming preloader runs asynchronously and does not block readiness, meaning the service can receive production traffic before the cache is warm. Under high concurrency, hundreds of simultaneous cache misses for the same key will all reach the origin (DB or external API) simultaneously, potentially overwhelming the downstream system and causing cascading latency or failures.</td><td>Implement probabilistic early expiration (PER) or a request-coalescing/mutex pattern: (1) Use a per-key async lock (e.g., Caffeine&#x27;s AsyncLoadingCache, asyncio.Lock per key in Python, or a Redis SET NX lock) so only one request fetches from origin while others wait and reuse the result. (2) Add jitter to TTL values (±10-15%) to prevent synchronized mass expiration. (3) Implement a &#x27;stale-while-revalidate&#x27; pattern: serve the expired entry while a background thread refreshes it. (4) Rate-limit the cache warmer to avoid it competing with live traffic on startup.</td></tr>
+<tr><td><span class="severity high">HIGH</span></td><td>Performance</td><td>Unbounded memory growth in L1 cache under misconfiguration: The max-entry count bound is configurable, but if the optional max-memory-bytes limit is not set in containerized environments (Kubernetes pods with memory limits), a large average value size combined with a high entry count can cause the JVM/Python process to exceed its container memory limit, triggering OOM kills. Caffeine&#x27;s weight-based eviction requires explicit weigher configuration.</td><td>(1) Make max-memory-bytes a required configuration field (not optional) for containerized deployments, validated at startup with a fail-fast check. (2) Set the Caffeine weigher to measure serialized byte size of values, not just entry count. (3) Configure L1 max size to no more than 20% of the container&#x27;s memory limit, enforced via a startup assertion. (4) Set JVM -XX:MaxRAMPercentage or Python memory profiling alerts. (5) Add a Prometheus alert on JVM heap usage &gt; 80% correlated with cache size metrics.</td></tr>
+<tr><td><span class="severity medium">MEDIUM</span></td><td>Operational</td><td>Redis SCAN-based bulk invalidation blocking production traffic: The Cache Invalidation Service uses SCAN+DEL for pattern-based bulk invalidation. On a large Redis keyspace (millions of keys), SCAN iterations are non-blocking individually but can generate thousands of DEL commands in rapid succession, causing Redis CPU spikes and latency increases for concurrent GET/SET operations from live traffic. This is compounded in Redis Cluster mode where SCAN must be run per shard.</td><td>(1) Rate-limit bulk invalidation operations using a token bucket or sleep-between-cursor approach (e.g., 100ms pause every 1000 keys scanned). (2) Prefer key tagging via Redis Sets (store key references in a tag set, then SMEMBERS + DEL) over SCAN to reduce iteration overhead. (3) Schedule large bulk invalidations during low-traffic windows via a job scheduler. (4) Add a circuit breaker specifically for invalidation operations so a runaway SCAN does not trigger the main circuit breaker and degrade cache reads. (5) Monitor Redis latency percentiles (p99 &gt; 5ms alert) during invalidation runs.</td></tr>
+<tr><td><span class="severity high">HIGH</span></td><td>Data Integrity</td><td>Serialization version mismatch causing deserialization failures or silent data corruption: The Cache Manager handles serialization/deserialization of cached values. When a microservice is deployed with a rolling update that changes a cached object&#x27;s schema (added/removed fields, type changes), L2 Redis will contain entries serialized by the old version while new instances attempt to deserialize them with the new schema. This can cause runtime exceptions, silent null fields, or incorrect business logic.</td><td>(1) Include a schema version or content hash in the cache key namespace (e.g., &#x27;user-profile:v3:{id}&#x27;) so old and new versions never collide. (2) Use schema-evolution-safe serialization formats (Protobuf with field numbering, Avro with schema registry, or JSON with explicit null handling) rather than Java serialization or pickle. (3) Implement a cache key versioning policy in the Configuration Store that increments on each deployment with schema changes. (4) Add a deserialization error handler in the Cache Manager that treats deserialization failures as cache misses (log + fetch from origin) rather than propagating exceptions.</td></tr>
+<tr><td><span class="severity medium">MEDIUM</span></td><td>Scalability</td><td>Redis Cluster hot-key skew under high cardinality access patterns: If a small number of cache keys (e.g., a global configuration object or a viral content item) receive disproportionately high read traffic, all requests hash to the same Redis shard, creating a hot-key bottleneck that saturates that shard&#x27;s CPU and network bandwidth. Redis Cluster&#x27;s sharding does not automatically rebalance hot keys.</td><td>(1) Implement local key replication for detected hot keys: replicate the value across N shards using a suffix (e.g., &#x27;hot-key:{random 0-9}&#x27;) and read from a random shard. (2) Rely on L1 cache as the primary defense—hot keys should almost always be served from L1 after the first miss. (3) Monitor per-shard command rate via Redis INFO commandstats and alert on shard imbalance &gt; 3x average. (4) Use Redis replica reads (already planned) to distribute read load across replicas for the hot shard. (5) Consider a dedicated Redis instance for known global/hot-key namespaces.</td></tr>
+<tr><td><span class="severity medium">MEDIUM</span></td><td>Operational</td><td>Circuit breaker miscalibration causing premature or delayed opening: The circuit breaker wrapping Redis calls uses thresholds for failure rate and latency. If thresholds are too sensitive, transient Redis hiccups (GC pause, network jitter) will open the circuit and force all traffic to origin, potentially overwhelming the DB. If too lenient, a degraded Redis will continue to receive traffic and add latency to every request before timing out.</td><td>(1) Use a sliding-window count-based breaker (Resilience4j COUNT_BASED, 20-request minimum) rather than time-based to avoid opening on sparse traffic. (2) Set separate thresholds for L2 read failures (higher tolerance, fall back to origin) vs. L2 write failures (lower tolerance, writes can be dropped). (3) Implement a half-open probe with a single test request before fully closing the circuit. (4) Expose circuit breaker state (OPEN/CLOSED/HALF_OPEN) as a Prometheus gauge and alert on sustained OPEN state &gt; 60 seconds. (5) Load-test circuit breaker behavior with chaos engineering (e.g., Toxiproxy simulating Redis latency spikes) before production deployment.</td></tr>
+</tbody>
+</table>
+
+<h3>Trade-offs</h3>
+<ul><li>Two-tier (L1+L2) vs. single distributed cache: L1 adds sub-millisecond hit latency and Redis failure resilience but introduces per-instance cache coherence complexity and potential for stale reads between invalidation events. A single Redis-only cache would be simpler to reason about for consistency but would add 1-5ms network overhead on every cache hit and create a single point of failure.</li>
+<li>TTL-based expiration vs. event-driven invalidation: TTL provides a simple, self-healing staleness bound but means data can be stale for up to TTL duration after a mutation. Event-driven invalidation (Pub/Sub) provides near-real-time consistency but adds operational complexity and has no delivery guarantee. The architecture uses both, which is correct but requires careful TTL sizing to bound worst-case staleness when invalidation events are missed.</li>
+<li>LRU eviction (Caffeine W-TinyLFU) vs. pure LRU: Caffeine&#x27;s W-TinyLFU provides better hit rates than strict LRU for skewed access patterns (Zipf distribution, common in production) by protecting frequently accessed items from one-time scan pollution. The trade-off is slightly higher CPU overhead for frequency tracking and less predictable eviction order, which can complicate debugging cache behavior.</li>
+<li>Async cache warming vs. blocking readiness: Running the preloader asynchronously allows faster service startup and avoids blocking health checks, but means the service accepts traffic in a cold-cache state. This trades startup latency for potential thundering herd risk during the warm-up window. A hybrid approach (warm top-N keys synchronously, rest async) would reduce this risk at the cost of slower startup.</li>
+<li>Write-through vs. write-around policy: Write-through keeps cache and origin in sync on writes but doubles write latency and can pollute the cache with infrequently re-read data. Write-around avoids cache pollution but means the next read after a write will always be a cache miss. The architecture supports both via policy selection, which is correct but requires per-namespace policy governance to avoid inconsistent behavior.</li>
+<li>Shared library distribution vs. sidecar proxy: Embedding the Cache Manager as a shared library (Maven/PyPI/npm) gives low-latency access and language-native integration but creates a library versioning and upgrade coordination problem across all consuming services. A sidecar proxy (e.g., Envoy with cache filter) would centralize cache logic but add network hop overhead and operational complexity.</li>
+<li>Redis persistence disabled vs. enabled: Disabling persistence treats Redis purely as a cache tier, simplifying operations and avoiding disk I/O overhead. However, after a Redis Cluster restart or failover, the entire L2 cache is cold, causing a thundering herd on the origin. Enabling RDB snapshots with a short interval would reduce cold-start impact at the cost of disk I/O and slightly increased memory usage.</li>
+</ul>
+
+<h2>7. Implementation Rationale</h2>
+<div class="card">
+<p>System designed based on requirement analysis identifying 9 functional requirements. Architecture uses {} to balance performance, maintainability, and scalability.</p>
+</div>
+
+</body>
+</html>

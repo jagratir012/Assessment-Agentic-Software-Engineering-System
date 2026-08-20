@@ -15,11 +15,7 @@ build/
 .idea/
 .kiro/
 
-# Cache (LLM response cache - regenerated automatically)
-.cache/
 
-# Output (regenerated on each run)
-output/
 
 # Test cache
 .pytest_cache/
@@ -28,5 +24,3 @@ output/
 .DS_Store
 Thumbs.db
 
-# Test file with hardcoded key
-test_api_key.py

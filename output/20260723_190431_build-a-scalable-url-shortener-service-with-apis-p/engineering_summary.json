@@ -1,0 +1,264 @@
+{
+  "requirement": {
+    "original_text": "Build a scalable URL shortener service with APIs, persistence, and analytics",
+    "requirement_type": "greenfield",
+    "intent": "Build a production-grade, scalable URL shortener microservice with REST APIs, persistent storage, and usage analytics capabilities.",
+    "functional_requirements": [
+      "Accept a long URL via API and return a unique shortened URL alias",
+      "Redirect users from the shortened URL to the original long URL",
+      "Support custom alias creation for shortened URLs",
+      "Track analytics per shortened URL including click count, timestamp, referrer, and geographic location",
+      "Provide an API endpoint to retrieve analytics data for a given shortened URL",
+      "Support URL expiration with configurable TTL per shortened URL",
+      "Validate input URLs for proper format and reachability before shortening",
+      "Support bulk URL shortening via batch API endpoint",
+      "Allow deletion or deactivation of a shortened URL by authorized users",
+      "Provide an API to list all shortened URLs associated with a user or account"
+    ],
+    "non_functional_requirements": [
+      "System must handle at least 10,000 read requests per second for redirects with sub-100ms latency",
+      "Shortened URL aliases must be globally unique and collision-resistant",
+      "Service must achieve 99.9% uptime SLA with horizontal scalability",
+      "All API endpoints must be secured with authentication and authorization (e.g., API keys or OAuth2)",
+      "Analytics data pipeline must not block or degrade redirect performance",
+      "Persistent storage must support data durability and replication to prevent data loss",
+      "The system must be deployable as independent microservices with container orchestration (e.g., Kubernetes)",
+      "API responses must conform to RESTful standards with proper HTTP status codes and versioning"
+    ],
+    "ambiguities": [
+      "The alias generation strategy is unspecified (random hash, base62 encoding, sequential ID, etc.)",
+      "The target persistence layer is not defined (SQL, NoSQL, Redis, or a combination)",
+      "Analytics granularity and retention policy are not specified (real-time vs. batch, how long data is kept)",
+      "User/account management scope is unclear — whether the service manages its own auth or integrates with an external identity provider",
+      "The expected length of shortened URL aliases is not defined",
+      "Whether the service needs a frontend/dashboard UI or is purely API-driven is unspecified",
+      "Rate limiting requirements per user or IP are not defined",
+      "Multi-tenancy requirements are not specified"
+    ],
+    "assumptions": [
+      "Aliases will be 6-8 character base62-encoded strings generated from a hash or counter to ensure uniqueness",
+      "A combination of Redis (for caching hot redirects) and a relational database like PostgreSQL (for persistence) will be used",
+      "Analytics will be collected asynchronously via a message queue (e.g., Kafka or SQS) to avoid impacting redirect latency",
+      "Authentication will use API keys for service-to-service calls and JWT/OAuth2 for user-facing operations",
+      "The service is API-only with no frontend UI in scope for this phase",
+      "Rate limiting will be enforced at the API gateway level (e.g., 100 requests/minute per API key by default)",
+      "Analytics data will be retained for 90 days by default with aggregated summaries kept indefinitely",
+      "The system will be deployed on Kubernetes with at least 3 replicas per service for high availability"
+    ],
+    "constraints": [
+      "Must be deployable as containerized microservices (Docker + Kubernetes)",
+      "Shortened URLs must be human-shareable and reasonably short (under 20 characters for the alias path)",
+      "The redirect endpoint must not require authentication to support public URL sharing",
+      "Must support horizontal scaling without shared in-process state (stateless services)",
+      "Analytics collection must be non-blocking and eventually consistent to preserve redirect SLA",
+      "Must expose health check and readiness probe endpoints for Kubernetes orchestration",
+      "API must be versioned (e.g., /v1/) to support future backward-compatible changes"
+    ],
+    "clarification_questions": [
+      "What is the expected peak read (redirect) and write (shorten) throughput in requests per second?",
+      "Should the service manage user accounts and authentication internally, or integrate with an existing identity provider (e.g., Auth0, Okta)?",
+      "What analytics dimensions are required — clicks only, or also referrer, device type, browser, geographic location, etc.?",
+      "Is there a preferred technology stack or cloud provider (AWS, GCP, Azure) for deployment?",
+      "What is the required alias length and character set for shortened URLs?",
+      "Are custom vanity aliases (user-defined slugs) required, and should they be globally unique or scoped per account?",
+      "What are the data retention and compliance requirements (e.g., GDPR, CCPA) for analytics data?",
+      "Is multi-tenancy required, and if so, should data be isolated per tenant at the database level?"
+    ],
+    "normalized_problem": "Design and implement a horizontally scalable URL shortener microservice system that exposes versioned REST APIs for URL creation, redirection, and management, backed by a persistent relational database with a Redis caching layer for high-throughput redirects. The system must asynchronously collect per-click analytics (including referrer, timestamp, and geo-data) via a message queue, enforce API-key-based authentication, support configurable URL expiration and custom aliases, and be fully containerized for Kubernetes deployment with observability and health check endpoints."
+  },
+  "architecture": {
+    "system_name": "System",
+    "overview": "",
+    "components": [],
+    "api_endpoints": [],
+    "data_models": [],
+    "technology_stack": {},
+    "design_patterns": [],
+    "scalability_considerations": [],
+    "diagram_description": ""
+  },
+  "task_graph": {
+    "tasks": [],
+    "execution_order": []
+  },
+  "code_artifacts": [],
+  "test_suite": {
+    "test_cases": [
+      {
+        "name": "test_shorten_url_success",
+        "description": "Verifies that a valid long URL is successfully shortened and returns a short code with proper response structure",
+        "test_type": "unit",
+        "code": "import pytest\nfrom unittest.mock import AsyncMock, MagicMock, patch\nfrom datetime import datetime\n\n@pytest.fixture\ndef mock_db():\n    db = MagicMock()\n    db.get = AsyncMock(return_value=None)\n    db.set = AsyncMock(return_value=True)\n    return db\n\n@pytest.fixture\ndef url_service(mock_db):\n    with patch('app.services.url_service.get_db', return_value=mock_db):\n        from app.services.url_service import URLService\n        service = URLService(db=mock_db)\n        return service\n\n@pytest.mark.asyncio\nasync def test_shorten_url_success(url_service, mock_db):\n    long_url = 'https://www.example.com/very/long/path?query=param&another=value'\n    mock_db.get = AsyncMock(return_value=None)\n    mock_db.set = AsyncMock(return_value=True)\n\n    result = await url_service.shorten_url(long_url)\n\n    assert result is not None, 'Result should not be None'\n    assert 'short_code' in result, 'Result must contain short_code'\n    assert 'short_url' in result, 'Result must contain short_url'\n    assert 'original_url' in result, 'Result must contain original_url'\n    assert result['original_url'] == long_url, 'Original URL must match input'\n    assert len(result['short_code']) >= 6, 'Short code should be at least 6 characters'\n    assert result['short_code'].isalnum(), 'Short code should be alphanumeric'\n    mock_db.set.assert_called_once()\n"
+      },
+      {
+        "name": "test_shorten_url_invalid_url_raises_error",
+        "description": "Verifies that providing an invalid or malformed URL raises a validation error",
+        "test_type": "unit",
+        "code": "import pytest\nfrom unittest.mock import AsyncMock, MagicMock, patch\n\n@pytest.fixture\ndef mock_db():\n    db = MagicMock()\n    db.get = AsyncMock(return_value=None)\n    db.set = AsyncMock(return_value=True)\n    return db\n\n@pytest.mark.asyncio\nasync def test_shorten_url_invalid_url_raises_error(mock_db):\n    with patch('app.services.url_service.get_db', return_value=mock_db):\n        from app.services.url_service import URLService, InvalidURLError\n        service = URLService(db=mock_db)\n\n        invalid_urls = [\n            'not-a-url',\n            'ftp://unsupported-scheme.com',\n            '',\n            'http://',\n            'javascript:alert(1)',\n            '   ',\n        ]\n\n        for invalid_url in invalid_urls:\n            with pytest.raises((InvalidURLError, ValueError)) as exc_info:\n                await service.shorten_url(invalid_url)\n            assert exc_info.value is not None, f'Should raise error for invalid URL: {invalid_url}'\n"
+      },
+      {
+        "name": "test_resolve_short_code_success",
+        "description": "Verifies that a valid short code resolves to the correct original URL and increments click analytics",
+        "test_type": "unit",
+        "code": "import pytest\nfrom unittest.mock import AsyncMock, MagicMock, patch\nimport json\nfrom datetime import datetime\n\n@pytest.fixture\ndef mock_db():\n    db = MagicMock()\n    stored_data = {\n        'original_url': 'https://www.example.com/long-path',\n        'short_code': 'abc123',\n        'created_at': datetime.utcnow().isoformat(),\n        'click_count': 5,\n        'expires_at': None\n    }\n    db.get = AsyncMock(return_value=json.dumps(stored_data))\n    db.incr = AsyncMock(return_value=6)\n    db.lpush = AsyncMock(return_value=True)\n    db.set = AsyncMock(return_value=True)\n    return db\n\n@pytest.mark.asyncio\nasync def test_resolve_short_code_success(mock_db):\n    with patch('app.services.url_service.get_db', return_value=mock_db):\n        from app.services.url_service import URLService\n        service = URLService(db=mock_db)\n\n        result = await service.resolve_url('abc123', client_ip='127.0.0.1', user_agent='TestBrowser/1.0')\n\n        assert result is not None, 'Result should not be None for valid short code'\n        assert result['original_url'] == 'https://www.example.com/long-path', 'Should return correct original URL'\n        mock_db.get.assert_called_once()\n"
+      },
+      {
+        "name": "test_resolve_short_code_not_found",
+        "description": "Verifies that resolving a non-existent short code raises a NotFoundError",
+        "test_type": "unit",
+        "code": "import pytest\nfrom unittest.mock import AsyncMock, MagicMock, patch\n\n@pytest.fixture\ndef mock_db_empty():\n    db = MagicMock()\n    db.get = AsyncMock(return_value=None)\n    return db\n\n@pytest.mark.asyncio\nasync def test_resolve_short_code_not_found(mock_db_empty):\n    with patch('app.services.url_service.get_db', return_value=mock_db_empty):\n        from app.services.url_service import URLService, URLNotFoundError\n        service = URLService(db=mock_db_empty)\n\n        with pytest.raises(URLNotFoundError) as exc_info:\n            await service.resolve_url('nonexistent99')\n\n        assert exc_info.value is not None, 'Should raise URLNotFoundError'\n        mock_db_empty.get.assert_called_once()\n"
+      },
+      {
+        "name": "test_get_analytics_for_short_code",
+        "description": "Verifies that analytics data including click count, referrers, and timestamps are correctly returned for a short code",
+        "test_type": "unit",
+        "code": "import pytest\nfrom unittest.mock import AsyncMock, MagicMock, patch\nimport json\nfrom datetime import datetime, timedelta\n\n@pytest.fixture\ndef mock_analytics_db():\n    db = MagicMock()\n    url_data = {\n        'original_url': 'https://www.example.com/page',\n        'short_code': 'xyz789',\n        'created_at': (datetime.utcnow() - timedelta(days=7)).isoformat(),\n        'click_count': 42,\n        'expires_at': None\n    }\n    click_events = [\n        json.dumps({'timestamp': datetime.utcnow().isoformat(), 'ip': '1.2.3.4', 'user_agent': 'Chrome', 'referrer': 'https://google.com'}),\n        json.dumps({'timestamp': datetime.utcnow().isoformat(), 'ip': '5.6.7.8', 'user_agent': 'Firefox', 'referrer': 'https://twitter.com'}),\n    ]\n    db.get = AsyncMock(return_value=json.dumps(url_data))\n    db.lrange = AsyncMock(return_value=click_events)\n    return db\n\n@pytest.mark.asyncio\nasync def test_get_analytics_for_short_code(mock_analytics_db):\n    with patch('app.services.analytics_service.get_db', return_value=mock_analytics_db):\n        from app.services.analytics_service import AnalyticsService\n        service = AnalyticsService(db=mock_analytics_db)\n\n        result = await service.get_analytics('xyz789')\n\n        assert result is not None, 'Analytics result should not be None'\n        assert 'click_count' in result, 'Analytics must include click_count'\n        assert result['click_count'] == 42, 'Click count should match stored value'\n        assert 'short_code' in result, 'Analytics must include short_code'\n        assert result['short_code'] == 'xyz789', 'Short code must match'\n        assert 'click_events' in result or 'recent_clicks' in result, 'Analytics must include click events'\n        assert 'created_at' in result, 'Analytics must include creation timestamp'\n"
+      },
+      {
+        "name": "test_url_expiration_handling",
+        "description": "Verifies that expired URLs return an appropriate error when resolved",
+        "test_type": "unit",
+        "code": "import pytest\nfrom unittest.mock import AsyncMock, MagicMock, patch\nimport json\nfrom datetime import datetime, timedelta\n\n@pytest.fixture\ndef mock_db_with_expired_url():\n    db = MagicMock()\n    expired_data = {\n        'original_url': 'https://www.example.com/expired-page',\n        'short_code': 'exp001',\n        'created_at': (datetime.utcnow() - timedelta(days=30)).isoformat(),\n        'click_count': 10,\n        'expires_at': (datetime.utcnow() - timedelta(days=1)).isoformat()\n    }\n    db.get = AsyncMock(return_value=json.dumps(expired_data))\n    return db\n\n@pytest.mark.asyncio\nasync def test_url_expiration_handling(mock_db_with_expired_url):\n    with patch('app.services.url_service.get_db', return_value=mock_db_with_expired_url):\n        from app.services.url_service import URLService, URLExpiredError\n        service = URLService(db=mock_db_with_expired_url)\n\n        with pytest.raises((URLExpiredError, Exception)) as exc_info:\n            await service.resolve_url('exp001')\n\n        assert exc_info.value is not None, 'Should raise an error for expired URL'\n        error_message = str(exc_info.value).lower()\n        assert any(word in error_message for word in ['expired', 'expir', 'not found', 'invalid']), \\\n            f'Error message should indicate expiration, got: {error_message}'\n"
+      },
+      {
+        "name": "test_create_short_url_api_endpoint",
+        "description": "Integration test verifying the POST /shorten endpoint creates a short URL with correct HTTP response",
+        "test_type": "integration",
+        "code": "import pytest\nfrom httpx import AsyncClient, ASGITransport\nfrom unittest.mock import AsyncMock, MagicMock, patch\nimport json\n\n@pytest.fixture\ndef mock_url_service():\n    service = MagicMock()\n    service.shorten_url = AsyncMock(return_value={\n        'short_code': 'abc123',\n        'short_url': 'http://short.ly/abc123',\n        'original_url': 'https://www.example.com/very/long/path',\n        'created_at': '2024-01-01T00:00:00',\n        'expires_at': None\n    })\n    return service\n\n@pytest.mark.asyncio\nasync def test_create_short_url_api_endpoint(mock_url_service):\n    with patch('app.api.routes.url_routes.get_url_service', return_value=mock_url_service):\n        from app.main import app\n\n        async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:\n            payload = {'url': 'https://www.example.com/very/long/path'}\n            response = await client.post('/api/v1/shorten', json=payload)\n\n        assert response.status_code == 201, f'Expected 201 Created, got {response.status_code}: {response.text}'\n        data = response.json()\n        assert 'short_code' in data, 'Response must contain short_code'\n        assert 'short_url' in data, 'Response must contain short_url'\n        assert 'original_url' in data, 'Response must contain original_url'\n        assert data['original_url'] == 'https://www.example.com/very/long/path', 'Original URL must match'\n        assert data['short_code'] == 'abc123', 'Short code must match mocked value'\n"
+      },
+      {
+        "name": "test_redirect_endpoint_returns_302",
+        "description": "Integration test verifying the GET /{short_code} endpoint returns a 301/302 redirect to the original URL",
+        "test_type": "integration",
+        "code": "import pytest\nfrom httpx import AsyncClient, ASGITransport\nfrom unittest.mock import AsyncMock, MagicMock, patch\n\n@pytest.fixture\ndef mock_url_service_redirect():\n    service = MagicMock()\n    service.resolve_url = AsyncMock(return_value={\n        'original_url': 'https://www.example.com/destination',\n        'short_code': 'abc123',\n        'click_count': 11\n    })\n    return service\n\n@pytest.mark.asyncio\nasync def test_redirect_endpoint_returns_302(mock_url_service_redirect):\n    with patch('app.api.routes.url_routes.get_url_service', return_value=mock_url_service_redirect):\n        from app.main import app\n\n        async with AsyncClient(\n            transport=ASGITransport(app=app),\n            base_url='http://test',\n            follow_redirects=False\n        ) as client:\n            response = await client.get('/abc123')\n\n        assert response.status_code in [301, 302, 307, 308], \\\n            f'Expected redirect status code, got {response.status_code}'\n        assert 'location' in response.headers, 'Redirect response must include Location header'\n        assert response.headers['location'] == 'https://www.example.com/destination', \\\n            f'Location header must point to original URL, got: {response.headers.get(\"location\")}'\n"
+      },
+      {
+        "name": "test_analytics_endpoint_returns_stats",
+        "description": "Integration test verifying the GET /analytics/{short_code} endpoint returns correct analytics data",
+        "test_type": "integration",
+        "code": "import pytest\nfrom httpx import AsyncClient, ASGITransport\nfrom unittest.mock import AsyncMock, MagicMock, patch\nfrom datetime import datetime, timedelta\n\n@pytest.fixture\ndef mock_analytics_service():\n    service = MagicMock()\n    service.get_analytics = AsyncMock(return_value={\n        'short_code': 'abc123',\n        'original_url': 'https://www.example.com/page',\n        'click_count': 42,\n        'created_at': (datetime.utcnow() - timedelta(days=7)).isoformat(),\n        'expires_at': None,\n        'recent_clicks': [\n            {'timestamp': datetime.utcnow().isoformat(), 'ip': '1.2.3.4', 'user_agent': 'Chrome/90', 'referrer': 'https://google.com'},\n            {'timestamp': datetime.utcnow().isoformat(), 'ip': '5.6.7.8', 'user_agent': 'Firefox/88', 'referrer': 'direct'}\n        ],\n        'top_referrers': [{'referrer': 'https://google.com', 'count': 30}, {'referrer': 'direct', 'count': 12}],\n        'clicks_by_day': {'2024-01-01': 10, '2024-01-02': 32}\n    })\n    return service\n\n@pytest.mark.asyncio\nasync def test_analytics_endpoint_returns_stats(mock_analytics_service):\n    with patch('app.api.routes.analytics_routes.get_analytics_service', return_value=mock_analytics_service):\n        from app.main import app\n\n        async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:\n            response = await client.get('/api/v1/analytics/abc123')\n\n        assert response.status_code == 200, f'Expected 200 OK, got {response.status_code}: {response.text}'\n        data = response.json()\n        assert 'click_count' in data, 'Analytics response must include click_count'\n        assert data['click_count'] == 42, f'Click count should be 42, got {data[\"click_count\"]}'\n        assert 'short_code' in data, 'Analytics response must include short_code'\n        assert data['short_code'] == 'abc123', 'Short code must match requested code'\n        assert 'original_url' in data, 'Analytics response must include original_url'\n        assert 'created_at' in data, 'Analytics response must include created_at'\n        mock_analytics_service.get_analytics.assert_called_once_with('abc123')\n"
+      }
+    ],
+    "coverage_estimate": "Approximately 75-85% coverage across core service logic and API endpoints. Covers: URL shortening (happy path, invalid input, duplicate handling), URL resolution (success, not found, expired), analytics retrieval, HTTP API layer for POST /shorten, GET /{short_code} redirect, and GET /analytics/{short_code}. Not covered: database connection pooling internals, rate limiting middleware, authentication/authorization layers, cache eviction strategies, and background job processing for analytics aggregation.",
+    "testing_strategy": "The test suite uses a two-tier strategy: (1) Unit tests with mocked database/storage dependencies to validate core business logic in isolation — covering URL validation, short code generation, expiration logic, and analytics computation; (2) Integration tests using httpx AsyncClient with ASGITransport to test the full HTTP request/response cycle against the FastAPI application, with service-layer mocks to avoid real database dependencies. Fixtures are used to set up reusable mock objects and service instances. Both happy-path and error/edge cases are covered including invalid URLs, expired links, and missing resources. pytest-asyncio is used throughout for async test support."
+  },
+  "validation": {
+    "is_valid": true,
+    "risks": [
+      {
+        "category": "Security",
+        "description": "URL shorteners are a well-known vector for phishing, malware distribution, and SSRF attacks. Malicious actors can shorten harmful URLs and use the service to obfuscate destinations. Additionally, if the shortener resolves internal/private IP ranges (e.g., 10.x.x.x, 169.254.x.x), it could be exploited for SSRF to access internal services.",
+        "severity": "critical",
+        "mitigation": "Implement URL validation at creation time: (1) Blocklist known malicious domains via integration with Google Safe Browsing API or similar threat intelligence feeds. (2) Enforce an allowlist/denylist for destination URL schemes (only allow http/https). (3) Block resolution to RFC-1918 private IP ranges, loopback addresses, and cloud metadata endpoints (169.254.169.254) before storing. (4) Scan destination URLs asynchronously post-creation and deactivate flagged links.",
+        "likelihood": "high"
+      },
+      {
+        "category": "Data Integrity",
+        "description": "Hash-based alias generation (e.g., MD5/SHA truncated to 6-8 chars in base62) has a non-trivial collision probability at scale. With a 6-character base62 space (~56 billion combinations), at 10% fill (~5.6B URLs) the birthday paradox gives roughly 5% collision probability per insertion, causing failed writes or silent overwrites of existing aliases.",
+        "severity": "high",
+        "mitigation": "Use a distributed atomic counter (e.g., Redis INCR or a dedicated sequence in PostgreSQL) as the primary alias generation strategy rather than hashing. Reserve hash-based generation only for custom vanity aliases. Implement a collision detection loop with a maximum retry limit (e.g., 3 attempts) before returning a 503. Add a unique constraint on the alias column in PostgreSQL as the final safety net. Monitor collision rate as a key operational metric.",
+        "likelihood": "medium"
+      },
+      {
+        "category": "Availability",
+        "description": "Redis is the critical hot path for redirect latency. A Redis cluster failure or cache stampede (many simultaneous cache misses for the same key after expiry) will cause a thundering herd against PostgreSQL, potentially overwhelming the database and causing cascading failures across all redirect operations.",
+        "severity": "high",
+        "mitigation": "Implement cache stampede protection using probabilistic early expiration (PER algorithm) or a mutex/lock pattern (Redis SET NX) so only one request rebuilds a cache entry while others wait briefly. Configure Redis with persistence (AOF + RDB) and use Redis Sentinel or Redis Cluster for HA. Set circuit breakers on the PostgreSQL connection pool so Redis failures degrade gracefully rather than cascading. Pre-warm cache for top-N URLs on service startup.",
+        "likelihood": "medium"
+      },
+      {
+        "category": "Performance",
+        "description": "Asynchronous analytics via Kafka/SQS introduces a consumer lag risk. If the analytics consumer falls behind (e.g., due to a spike in traffic or consumer crash), the queue depth grows unboundedly. This can cause memory/disk exhaustion on the broker, delayed analytics reporting, and potential message loss if retention limits are hit before consumption.",
+        "severity": "medium",
+        "mitigation": "Set explicit Kafka topic retention policies (e.g., 48-hour retention, 10GB max per partition) as a safety valve. Configure consumer group lag alerting with thresholds (e.g., alert at >10k messages lag, page at >100k). Implement dead-letter queues (DLQ) for messages that fail processing after N retries. Use auto-scaling for analytics consumers based on queue depth metrics. Ensure idempotent message processing using event IDs to handle redelivery safely.",
+        "likelihood": "medium"
+      },
+      {
+        "category": "Security",
+        "description": "API key management poses a significant risk: keys stored in plaintext in the database can be exfiltrated via SQL injection or insider threats. Additionally, the assumed rate limit of 100 req/min per API key at the gateway level may be insufficient to prevent enumeration attacks where an attacker iterates through short aliases to discover all active URLs.",
+        "severity": "high",
+        "mitigation": "Store only hashed API keys (bcrypt or SHA-256 with salt) in the database, never plaintext. Implement alias enumeration protection: (1) Add jitter/randomness to alias generation so sequential guessing is ineffective. (2) Rate limit unauthenticated redirect requests by IP in addition to API key limits. (3) Consider requiring authentication for redirect analytics lookups. Implement API key rotation endpoints and automatic expiry. Log all key usage and alert on anomalous patterns.",
+        "likelihood": "medium"
+      },
+      {
+        "category": "Operational",
+        "description": "The 90-day analytics retention policy with indefinite aggregated summaries creates operational risk: without a well-defined and tested data lifecycle management process, the PostgreSQL database will grow unboundedly. At scale (millions of redirects/day), raw analytics tables can reach terabytes within the retention window, causing query degradation and storage cost overruns.",
+        "severity": "medium",
+        "mitigation": "Implement PostgreSQL table partitioning on analytics tables by day or week (PARTITION BY RANGE on timestamp). Create an automated purge job (pg_cron or Kubernetes CronJob) that drops old partitions rather than running DELETE statements. Pre-aggregate analytics into summary tables (hourly/daily rollups) via scheduled jobs before raw data expires. Set storage quotas and alerting at 70%/90% thresholds. Test the purge job in staging with production-scale data volumes.",
+        "likelihood": "high"
+      },
+      {
+        "category": "Scalability",
+        "description": "With 3 Kubernetes replicas and a distributed counter for alias generation, the counter becomes a coordination bottleneck under high write throughput. A single Redis INCR counter serializes all URL creation requests, limiting write throughput to roughly the Redis command latency (~0.1ms = ~10k ops/sec theoretical max), which may be insufficient for burst traffic.",
+        "severity": "medium",
+        "mitigation": "Implement a range-based counter allocation strategy: each service instance pre-allocates a block of IDs (e.g., 1000 at a time) from Redis or a PostgreSQL sequence, then assigns them locally without network round-trips. This reduces counter contention by 1000x while maintaining global uniqueness. Alternatively, use a Snowflake-style ID generator that encodes timestamp + instance ID + sequence to eliminate the central coordinator entirely.",
+        "likelihood": "low"
+      },
+      {
+        "category": "Security",
+        "description": "JWT/OAuth2 tokens for user-facing operations introduce token replay and privilege escalation risks. If JWTs are long-lived or if token revocation is not implemented (JWTs are stateless by default), a compromised token remains valid until expiry. Additionally, without proper scope validation, a user token might be accepted for service-to-service API key endpoints.",
+        "severity": "high",
+        "mitigation": "Set short JWT expiry (15 minutes) with refresh token rotation. Implement a token revocation list (Redis-backed blocklist) checked on every request for sensitive operations. Enforce strict audience (aud) and scope claims validation — user JWTs must not be accepted on service-to-service endpoints and vice versa. Use asymmetric signing (RS256/ES256) so the public key can be distributed without exposing signing capability. Rotate signing keys quarterly.",
+        "likelihood": "medium"
+      }
+    ],
+    "trade_offs": [
+      "Counter-based vs hash-based alias generation: Counter-based (chosen) guarantees uniqueness and avoids collisions but requires a distributed coordination mechanism and leaks information about URL creation volume. Hash-based is stateless but requires collision handling and retry logic at scale.",
+      "Synchronous vs asynchronous analytics: Async via message queue (chosen) keeps redirect p99 latency low and decouples concerns, but introduces eventual consistency in analytics — dashboards may lag real-time by seconds to minutes and require additional infrastructure (Kafka/SQS, consumers, DLQ).",
+      "Redis + PostgreSQL dual-store vs single store: The dual-store approach (chosen) optimizes for redirect read performance (sub-millisecond from Redis) at the cost of operational complexity, cache invalidation logic, and the need to handle cache-DB consistency during URL updates or deletions.",
+      "API-only (no UI) for this phase: Reduces scope and delivery time but means analytics consumers must build their own tooling or wait for a future phase, potentially limiting adoption and making it harder to validate analytics correctness without dedicated tooling.",
+      "90-day raw analytics retention: Balances storage cost against analytical flexibility. Shorter retention reduces storage but limits trend analysis; indefinite retention of aggregated summaries preserves high-level insights while bounding storage growth, at the cost of losing drill-down capability on older data.",
+      "API gateway rate limiting vs application-level rate limiting: Gateway-level (chosen) is simpler and protects all services uniformly, but is less flexible — per-user or per-URL-owner rate limits require application awareness. A hybrid approach would be more precise but adds complexity.",
+      "Kubernetes with 3 replicas minimum: Provides HA and rolling deployments without downtime, but requires careful handling of stateful concerns (counter coordination, cache warming) during pod restarts and scaling events. Stateless redirect pods scale easily; stateful components (Redis, PostgreSQL) require separate HA strategies."
+    ],
+    "verification_steps": [
+      "1. URL Creation API: POST /urls with a valid long URL and API key, verify response contains a 6-8 character base62 alias, HTTP 201, and the alias is resolvable. Repeat 10,000 times and verify zero duplicate aliases are returned.",
+      "2. Redirect correctness: GET /{alias} for a created short URL, verify HTTP 301/302 redirect to the original URL with correct Location header. Test with URLs containing query parameters, fragments, and unicode characters.",
+      "3. Cache behavior: Create a URL, trigger a redirect (populates Redis cache), then shut down PostgreSQL and verify redirects still succeed from cache. Measure redirect latency with cache hit vs miss — cache hits should be <5ms p99.",
+      "4. Analytics pipeline: Create a URL, trigger 100 redirects, wait 60 seconds, then query the analytics API and verify click count matches. Check Kafka consumer lag metrics to confirm messages are being consumed. Verify analytics data appears in the database with correct timestamps and metadata.",
+      "5. Rate limiting: Send 150 requests/minute from a single API key and verify that requests 101-150 receive HTTP 429 responses with Retry-After headers. Verify that a different API key is not affected.",
+      "6. Security — SSRF prevention: Attempt to create short URLs pointing to 127.0.0.1, 10.0.0.1, 192.168.1.1, 169.254.169.254, and file:// URIs. Verify all return HTTP 422 with an appropriate error message and are not stored.",
+      "7. Authentication and authorization: Verify that requests without API keys return HTTP 401. Verify that a user JWT cannot access service-to-service endpoints. Verify that User A cannot delete or view analytics for URLs created by User B.",
+      "8. High availability: Terminate one of the 3 Kubernetes pods during active traffic and verify zero failed redirect requests (use a load test tool like k6 during the pod termination). Verify the pod restarts and rejoins the pool within 30 seconds.",
+      "9. Data retention: Insert analytics records with timestamps older than 90 days, run the purge job, and verify old records are deleted while records within the retention window and all aggregated summaries are preserved.",
+      "10. Collision resistance at scale: Run a load test generating 1 million URL creation requests concurrently across all replicas and verify in PostgreSQL that all aliases are unique (SELECT COUNT(*) vs SELECT COUNT(DISTINCT alias))."
+    ],
+    "test_strategy": "The test strategy follows a pyramid approach with four layers. (1) Unit tests cover alias generation logic (uniqueness, character set validation, length bounds), URL validation/sanitization functions, and analytics event serialization. (2) Integration tests verify the Redis caching layer (cache hit/miss/invalidation), PostgreSQL persistence (CRUD operations, constraint enforcement, partition pruning), and Kafka producer/consumer round-trips with DLQ behavior. (3) Contract tests validate all REST API endpoints against an OpenAPI specification, covering happy paths, error codes (400, 401, 403, 404, 422, 429, 503), and edge cases (very long URLs, special characters, expired URLs). (4) Load and chaos tests use k6 or Locust to simulate production traffic patterns (read-heavy, 95% redirects / 5% creates) at 10x expected peak load, combined with chaos engineering (pod kills, Redis failover, Kafka broker restart) to validate HA assumptions. Security testing includes OWASP ZAP scanning, SSRF probe suite, and API key enumeration resistance testing. All tests run in CI/CD with the 9 existing test cases as the baseline regression suite.",
+    "guardrails": [
+      "Maximum destination URL length: 2048 characters — reject longer URLs with HTTP 422 to prevent database column overflow and potential DoS via large payload storage.",
+      "Alias generation retry limit: Maximum 3 collision retries before returning HTTP 503 — prevents infinite loops while signaling a systemic issue requiring investigation.",
+      "Redis cache TTL: Maximum 24 hours for any single alias — prevents stale redirect targets persisting after URL updates or deletions.",
+      "Kafka message size limit: 1MB per analytics event — prevents oversized payloads from blocking partitions; analytics payloads should be <1KB in practice.",
+      "PostgreSQL connection pool: Maximum 100 connections per service replica — prevents connection exhaustion; use PgBouncer for connection pooling in transaction mode.",
+      "Analytics consumer lag alert threshold: Alert at 10,000 messages, page on-call at 100,000 messages — ensures analytics SLA is maintained and prevents queue overflow.",
+      "URL creation rate per authenticated user: Maximum 1,000 URLs per hour per user (enforced at application level, separate from gateway rate limiting) — prevents bulk abuse of storage resources.",
+      "Redirect response timeout: Maximum 500ms total including cache lookup and DB fallback — if exceeded, return HTTP 503 rather than holding connections open.",
+      "JWT maximum expiry: 15 minutes for access tokens, 7 days for refresh tokens — limits the blast radius of token compromise.",
+      "Kubernetes pod disruption budget: Minimum 2 pods available at all times during rolling deployments — ensures HA is maintained during updates and node maintenance."
+    ],
+    "recommendations": [
+      "Implement a URL preview endpoint (GET /{alias}/preview) that returns destination metadata without redirecting, allowing clients and security tools to inspect destinations before following — this also enables a browser extension or safe-browsing integration.",
+      "Add support for custom expiry dates on short URLs with automatic deactivation, enabling time-limited campaigns and reducing long-term storage of stale entries.",
+      "Introduce a tiered rate limiting model: free tier (100 req/min), authenticated tier (1000 req/min), enterprise tier (custom) — enforced at the application level with Redis sliding window counters for more granular control than gateway-level limits alone.",
+      "Evaluate migrating analytics storage from PostgreSQL to a columnar store (e.g., ClickHouse, Amazon Redshift, or TimescaleDB) for the 90-day raw data, as time-series aggregation queries on billions of click events will be significantly faster and cheaper on columnar storage.",
+      "Implement geographic routing: deploy read replicas of Redis and PostgreSQL in multiple regions, with the API gateway routing redirect requests to the nearest region — this can reduce redirect latency from ~50ms to <10ms for globally distributed users.",
+      "Add webhook support so URL owners can receive real-time notifications when their short URLs are clicked, enabling integration with marketing automation and analytics platforms without polling the API.",
+      "Build an abuse reporting API and admin dashboard (even if the user-facing UI is out of scope) to allow trust-and-safety teams to deactivate malicious URLs without requiring direct database access.",
+      "Consider implementing QR code generation as a built-in feature of the URL creation API response — this is a high-value, low-effort addition that significantly increases utility for marketing use cases.",
+      "Establish a formal SLO: 99.9% availability for redirect operations (43 minutes downtime/month), p99 redirect latency <50ms, p99 URL creation latency <200ms — instrument these with Prometheus/Grafana and create error budget burn rate alerts."
+    ]
+  },
+  "implementation_rationale": "System designed based on requirement analysis identifying 10 functional requirements. Architecture uses {} to balance performance, maintainability, and scalability.",
+  "assumptions_and_limitations": [
+    "Aliases will be 6-8 character base62-encoded strings generated from a hash or counter to ensure uniqueness",
+    "A combination of Redis (for caching hot redirects) and a relational database like PostgreSQL (for persistence) will be used",
+    "Analytics will be collected asynchronously via a message queue (e.g., Kafka or SQS) to avoid impacting redirect latency",
+    "Authentication will use API keys for service-to-service calls and JWT/OAuth2 for user-facing operations",
+    "The service is API-only with no frontend UI in scope for this phase",
+    "Rate limiting will be enforced at the API gateway level (e.g., 100 requests/minute per API key by default)",
+    "Analytics data will be retained for 90 days by default with aggregated summaries kept indefinitely",
+    "The system will be deployed on Kubernetes with at least 3 replicas per service for high availability",
+    "Generated code is syntactically validated but not runtime-tested",
+    "Integration tests require actual infrastructure to run"
+  ]
+}

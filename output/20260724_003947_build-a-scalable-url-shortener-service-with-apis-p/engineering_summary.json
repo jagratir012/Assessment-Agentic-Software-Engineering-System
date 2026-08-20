@@ -1,0 +1,601 @@
+{
+  "requirement": {
+    "original_text": "Build a scalable URL shortener service with APIs, persistence, and analytics.",
+    "requirement_type": "greenfield",
+    "intent": "Build a production-grade, scalable URL shortener service that exposes APIs for creating and resolving short URLs, persists data reliably, and provides usage analytics.",
+    "functional_requirements": [
+      "Accept a long URL via API and return a unique shortened URL",
+      "Redirect users from a short URL to the original long URL",
+      "Support custom alias/slug creation for short URLs",
+      "Track click analytics including timestamp, IP address, user agent, and referrer",
+      "Provide an API endpoint to retrieve analytics data for a given short URL",
+      "Support URL expiration with configurable TTL per short URL",
+      "Validate input URLs to ensure they are well-formed and reachable",
+      "Support bulk URL shortening via a batch API endpoint",
+      "Allow deletion or deactivation of a short URL by its owner",
+      "Provide an API to list all short URLs created by a specific user or API key"
+    ],
+    "non_functional_requirements": [
+      "High availability with at least 99.9% uptime SLA for redirect service",
+      "Low latency redirects with p99 response time under 50ms",
+      "Horizontally scalable to handle at least 10,000 redirects per second",
+      "Secure API access via API keys or OAuth2 tokens",
+      "Data durability with persistent storage and backup strategy",
+      "Analytics pipeline should not block or degrade redirect performance",
+      "Short URL codes must be collision-resistant and unpredictable",
+      "Rate limiting to prevent abuse of the URL creation and redirect endpoints",
+      "GDPR/privacy compliance for storing user and analytics data"
+    ],
+    "ambiguities": [
+      "No specification of the short URL code length or character set (e.g., Base62, 6 chars vs 8 chars)",
+      "Authentication model is unspecified \u2014 anonymous usage vs. user accounts vs. API key only",
+      "Analytics granularity and retention period are not defined",
+      "No clarity on whether custom domains (vanity domains) are supported for short URLs",
+      "The target infrastructure or cloud provider is not specified",
+      "No definition of what 'scalable' means in terms of concrete traffic numbers",
+      "It is unclear whether the service is multi-tenant or single-tenant",
+      "No specification of the tech stack or language preference"
+    ],
+    "assumptions": [
+      "Short URL codes will be 7-character Base62 alphanumeric strings generated via a hash or counter-based approach",
+      "Authentication will use API keys for programmatic access with optional user account registration",
+      "Analytics data will be retained for 90 days by default with aggregated summaries kept indefinitely",
+      "Custom vanity domains are out of scope for the initial version",
+      "The service will be deployed on a major cloud provider (AWS/GCP/Azure) using containerized microservices",
+      "Scalability target is defined as supporting up to 10,000 redirects/sec and 1,000 URL creations/sec",
+      "The service is multi-tenant, with each tenant identified by an API key",
+      "A relational database (e.g., PostgreSQL) will be used for URL persistence and a cache layer (e.g., Redis) for hot redirects"
+    ],
+    "constraints": [
+      "Short URLs must be globally unique across the system",
+      "Redirect endpoint must not introduce significant latency \u2014 cache-first architecture required",
+      "Analytics writes must be asynchronous to avoid impacting redirect latency",
+      "The system must handle hash collisions gracefully with a retry or fallback mechanism",
+      "All data at rest and in transit must be encrypted",
+      "The API must be versioned (e.g., /v1/) to support future evolution without breaking changes",
+      "Infrastructure must support zero-downtime deployments"
+    ],
+    "clarification_questions": [
+      "What are the expected peak traffic volumes (redirects per second and URL creations per day)?",
+      "Should the service support user accounts and authentication, or is API key access sufficient?",
+      "What analytics dimensions are required \u2014 clicks over time, geographic data, device/browser breakdown?",
+      "Is support for custom aliases and/or custom domains (vanity domains) required?",
+      "What is the preferred cloud provider and any existing infrastructure constraints?",
+      "What is the required data retention period for analytics and URL records?",
+      "Should expired or deleted URLs return a 404 or redirect to a configurable fallback page?",
+      "Is there a requirement for a web-based dashboard UI, or is API-only sufficient for the initial release?",
+      "Are there any compliance requirements (GDPR, CCPA, HIPAA) that must be addressed?",
+      "What is the preferred technology stack or are there any language/framework constraints?"
+    ],
+    "normalized_problem": "Design and implement a production-grade, horizontally scalable URL shortener service exposing RESTful APIs for URL creation, resolution, and management, backed by a durable persistent store with a caching layer for high-throughput redirects. The system must support multi-tenant API key authentication, asynchronous click analytics collection, configurable URL expiration, and be deployable on cloud infrastructure with high availability, rate limiting, and sub-50ms p99 redirect latency."
+  },
+  "architecture": {
+    "system_name": "SnapLink URL Shortener Service",
+    "overview": "SnapLink is a production-grade, multi-tenant URL shortening platform built on containerized microservices deployed on AWS. It uses a cache-first redirect architecture backed by PostgreSQL for durable URL persistence and Redis for sub-millisecond hot-path lookups, while decoupling analytics ingestion via an asynchronous Kafka pipeline to ensure redirect latency is never impacted by write operations.",
+    "components": [
+      {
+        "name": "API Gateway",
+        "responsibility": "Handles all inbound HTTP/HTTPS traffic, enforces TLS termination, performs API key and OAuth2 token authentication, applies rate limiting per tenant, routes requests to downstream services, and enforces versioned API path routing (/v1/). Acts as the single entry point for all client interactions.",
+        "technology": "AWS API Gateway (HTTP API mode) with AWS WAF for DDoS and abuse protection, backed by custom Lambda authorizers for API key validation"
+      },
+      {
+        "name": "URL Shortener Service",
+        "responsibility": "Core business logic service responsible for creating short URLs (single and batch), validating input URLs for well-formedness and reachability, generating collision-resistant 7-character Base62 codes using a distributed counter from Redis combined with Base62 encoding, handling custom alias registration, enforcing TTL/expiration policies, managing URL deactivation and deletion, and listing URLs per tenant. Handles collision detection with automatic retry up to 3 times before falling back to a random entropy-based code.",
+        "technology": "Node.js 20 LTS with Fastify framework, deployed as Docker containers on AWS ECS Fargate with auto-scaling policies; uses Zod for input validation and axios with a 3-second timeout for URL reachability checks"
+      },
+      {
+        "name": "Redirect Service",
+        "responsibility": "Handles the high-throughput redirect hot path exclusively. On each request, performs a Redis cache lookup first; on cache miss, queries PostgreSQL and back-fills the cache. Returns HTTP 301/302 redirects. Checks URL expiration and active status before redirecting. Publishes a lightweight click event to Kafka asynchronously after sending the redirect response, ensuring zero analytics overhead on redirect latency.",
+        "technology": "Go 1.22 with net/http standard library for maximum throughput, deployed on AWS ECS Fargate with aggressive horizontal auto-scaling (target 70% CPU); uses go-redis client for cache and pgx for PostgreSQL fallback reads"
+      },
+      {
+        "name": "Redis Cache Cluster",
+        "responsibility": "Serves as the primary lookup store for the redirect hot path. Stores short_code-to-URL mappings with TTL alignment matching URL expiration. Also provides distributed atomic counters for Base62 code generation and stores rate limiting sliding window counters per API key. Configured with read replicas to distribute redirect read load.",
+        "technology": "Amazon ElastiCache for Redis 7.x in cluster mode with 3 shards and 2 read replicas per shard; TLS in-transit encryption enabled; daily snapshots to S3 for durability"
+      },
+      {
+        "name": "Primary Database",
+        "responsibility": "Durable source of truth for all URL records, user/tenant accounts, API keys, and aggregated analytics summaries. Stores full URL metadata including owner, creation time, expiration, active status, and custom aliases. Supports transactional writes for URL creation with unique constraint enforcement on short codes to handle race conditions. Partitioned analytics summary tables retained indefinitely.",
+        "technology": "Amazon Aurora PostgreSQL 15 (Multi-AZ with one writer and two readers); pgcrypto for at-rest column encryption of sensitive fields; automated backups with 35-day retention and point-in-time recovery; connection pooling via PgBouncer sidecar"
+      },
+      {
+        "name": "Analytics Ingestion Pipeline",
+        "responsibility": "Consumes raw click events published by the Redirect Service from Kafka topics. Enriches events with geolocation data via MaxMind GeoIP2, anonymizes IP addresses for GDPR compliance (stores hashed/truncated IPs), and writes enriched records to TimescaleDB for time-series analytics queries. Runs aggregation jobs every 5 minutes to update summary counters in PostgreSQL. Purges raw click data older than 90 days via scheduled jobs.",
+        "technology": "Apache Kafka 3.6 on Amazon MSK for event streaming; Apache Flink 1.18 on Amazon EMR Serverless for stream processing and enrichment; TimescaleDB (PostgreSQL extension) on Amazon RDS for time-series click storage; AWS Lambda for scheduled 90-day purge jobs"
+      },
+      {
+        "name": "Analytics Query Service",
+        "responsibility": "Exposes read-only API endpoints for retrieving click analytics for a given short URL. Queries TimescaleDB for raw time-series data and PostgreSQL for aggregated summaries. Enforces tenant isolation ensuring API keys can only access their own URL analytics. Supports filtering by date range, grouping by day/hour, and pagination for large result sets.",
+        "technology": "Python 3.12 with FastAPI framework deployed on AWS ECS Fargate; SQLAlchemy with asyncpg for async TimescaleDB queries; Redis for caching frequently requested analytics summaries with 60-second TTL"
+      },
+      {
+        "name": "Background Worker Service",
+        "responsibility": "Handles asynchronous tasks including: URL reachability validation jobs queued during bulk creation, expired URL deactivation sweeps every 5 minutes, API key rotation notifications, and tenant usage report generation. Decouples slow or non-critical operations from the synchronous API request path.",
+        "technology": "Python 3.12 with Celery 5.x and Redis as the broker/result backend; deployed on AWS ECS Fargate; uses Beat scheduler for periodic tasks; Dead Letter Queue via Amazon SQS for failed job retry with exponential backoff"
+      }
+    ],
+    "api_endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/v1/urls",
+        "description": "Creates a single shortened URL. Validates the long URL for well-formedness synchronously and queues reachability check asynchronously for non-blocking response. Generates a 7-character Base62 short code or accepts a custom alias. Supports optional TTL in seconds. Returns the full short URL, expiration time, and creation metadata.",
+        "request_body": {
+          "long_url": "string (required, max 2048 chars, must be valid URL)",
+          "custom_alias": "string (optional, 3-50 chars, alphanumeric and hyphens only)",
+          "ttl_seconds": "integer (optional, min 300, max 31536000, default null = no expiry)",
+          "tags": "array of strings (optional, for owner-side organization)"
+        },
+        "response_schema": {
+          "id": "uuid",
+          "short_code": "string (7 chars Base62)",
+          "short_url": "string (full URL e.g. https://snpl.ink/abc1234)",
+          "long_url": "string",
+          "custom_alias": "string or null",
+          "expires_at": "ISO8601 datetime or null",
+          "created_at": "ISO8601 datetime",
+          "owner_api_key_id": "uuid",
+          "status": "string (active|pending_validation)"
+        },
+        "status_codes": {
+          "201": "Short URL created successfully",
+          "400": "Invalid or malformed long URL",
+          "409": "Custom alias already taken",
+          "422": "Validation error on request body fields",
+          "429": "Rate limit exceeded for URL creation",
+          "401": "Missing or invalid API key"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/urls/batch",
+        "description": "Creates up to 100 short URLs in a single request. Each item in the batch is processed independently; partial success is supported. Returns a results array with per-item success or error status. Reachability validation for all items is queued asynchronously. Useful for bulk migration or programmatic URL generation workflows.",
+        "request_body": {
+          "urls": "array of objects (required, max 100 items)",
+          "urls[].long_url": "string (required)",
+          "urls[].custom_alias": "string (optional)",
+          "urls[].ttl_seconds": "integer (optional)",
+          "urls[].client_ref_id": "string (optional, caller-provided idempotency reference)"
+        },
+        "response_schema": {
+          "total": "integer",
+          "succeeded": "integer",
+          "failed": "integer",
+          "results": "array of objects with fields: client_ref_id, short_url, short_code, error (null on success), status_code (per item)"
+        },
+        "status_codes": {
+          "207": "Multi-status: partial or full success, inspect results array",
+          "400": "Entire batch request is malformed",
+          "413": "Batch exceeds 100 item limit",
+          "429": "Rate limit exceeded",
+          "401": "Unauthorized"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/urls",
+        "description": "Lists all short URLs owned by the authenticated API key with pagination, filtering by status (active/expired/deactivated), and sorting by creation date or click count. Supports cursor-based pagination for consistent results under concurrent writes. Intended for dashboard and management use cases.",
+        "request_body": null,
+        "response_schema": {
+          "data": "array of URL objects (id, short_code, short_url, long_url, status, created_at, expires_at, total_clicks)",
+          "pagination": {
+            "next_cursor": "string or null",
+            "prev_cursor": "string or null",
+            "limit": "integer",
+            "total_count": "integer"
+          }
+        },
+        "status_codes": {
+          "200": "Success with paginated URL list",
+          "401": "Unauthorized",
+          "400": "Invalid query parameters"
+        }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/urls/{short_code}",
+        "description": "Deactivates or permanently deletes a short URL identified by its short code. Soft-delete (deactivation) is the default behavior, marking the URL as inactive and returning 410 Gone on future redirect attempts. Hard delete can be requested via query param and removes all associated raw analytics within 24 hours per GDPR right-to-erasure compliance.",
+        "request_body": null,
+        "response_schema": {
+          "short_code": "string",
+          "status": "string (deactivated|deleted)",
+          "deactivated_at": "ISO8601 datetime"
+        },
+        "status_codes": {
+          "200": "URL successfully deactivated or deleted",
+          "404": "Short URL not found or not owned by caller",
+          "401": "Unauthorized",
+          "403": "Forbidden: caller does not own this URL"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/urls/{short_code}/analytics",
+        "description": "Returns click analytics for a specific short URL. Supports date range filtering, granularity selection (hourly/daily), and breakdown dimensions (by country, browser, OS, referrer domain). Returns both raw time-series data and pre-aggregated summary counters. Enforces tenant ownership check before returning data.",
+        "request_body": null,
+        "response_schema": {
+          "short_code": "string",
+          "summary": {
+            "total_clicks": "integer",
+            "unique_ips_hashed": "integer",
+            "top_referrers": "array of {domain, count}",
+            "top_countries": "array of {country_code, count}",
+            "top_browsers": "array of {browser, count}"
+          },
+          "time_series": "array of {timestamp, click_count, granularity}",
+          "date_range": {
+            "from": "ISO8601 datetime",
+            "to": "ISO8601 datetime"
+          }
+        },
+        "status_codes": {
+          "200": "Analytics data returned successfully",
+          "404": "Short URL not found",
+          "403": "Caller does not own this short URL",
+          "401": "Unauthorized",
+          "400": "Invalid date range or granularity parameter"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/{short_code}",
+        "description": "The redirect endpoint. Resolves a short code to its original long URL and issues an HTTP 302 redirect. Checks Redis cache first; falls back to PostgreSQL on cache miss and back-fills cache. Validates URL is active and not expired before redirecting. Asynchronously publishes a click event to Kafka after sending the response. Returns 410 for deactivated URLs and 404 for unknown codes.",
+        "request_body": null,
+        "response_schema": {
+          "Location": "string (HTTP header with destination URL)"
+        },
+        "status_codes": {
+          "302": "Redirect to original long URL",
+          "404": "Short code not found",
+          "410": "URL has been deactivated or expired",
+          "429": "Redirect rate limit exceeded for this IP"
+        }
+      }
+    ],
+    "data_models": [
+      {
+        "name": "ShortURL",
+        "fields": {
+          "id": "UUID, primary key, generated via gen_random_uuid()",
+          "short_code": "VARCHAR(50), unique not null, indexed \u2014 7-char Base62 or custom alias",
+          "long_url": "TEXT not null, encrypted at rest via pgcrypto",
+          "owner_api_key_id": "UUID not null, foreign key to ApiKey.id, indexed",
+          "status": "ENUM('active','deactivated','expired') not null, default 'active', indexed",
+          "is_custom_alias": "BOOLEAN not null default false",
+          "ttl_seconds": "INTEGER nullable \u2014 null means no expiry",
+          "expires_at": "TIMESTAMPTZ nullable, indexed for expiry sweep queries",
+          "tags": "TEXT[] nullable \u2014 owner-defined labels",
+          "created_at": "TIMESTAMPTZ not null default now()",
+          "updated_at": "TIMESTAMPTZ not null default now()",
+          "deleted_at": "TIMESTAMPTZ nullable \u2014 soft delete timestamp",
+          "validation_status": "ENUM('pending','valid','unreachable') not null default 'pending'"
+        }
+      },
+      {
+        "name": "ApiKey",
+        "fields": {
+          "id": "UUID, primary key",
+          "key_hash": "VARCHAR(64) not null unique \u2014 SHA-256 hash of the raw API key, never store plaintext",
+          "key_prefix": "VARCHAR(8) not null \u2014 first 8 chars of raw key for identification display (e.g. snpl_abc1)",
+          "owner_email": "VARCHAR(320) nullable, encrypted at rest",
+          "tenant_id": "UUID not null \u2014 logical grouping for multi-tenant isolation",
+          "rate_limit_rpm": "INTEGER not null default 1000 \u2014 requests per minute for URL creation",
+          "rate_limit_rps_redirect": "INTEGER not null default 500 \u2014 redirect requests per second",
+          "is_active": "BOOLEAN not null default true",
+          "scopes": "TEXT[] not null \u2014 e.g. ['url:create','url:delete','analytics:read']",
+          "created_at": "TIMESTAMPTZ not null default now()",
+          "last_used_at": "TIMESTAMPTZ nullable",
+          "expires_at": "TIMESTAMPTZ nullable"
+        }
+      }
+    ],
+    "technology_stack": {},
+    "design_patterns": [],
+    "scalability_considerations": [],
+    "diagram_description": ""
+  },
+  "task_graph": {
+    "tasks": [
+      {
+        "id": "task-001",
+        "name": "System Architecture Design",
+        "description": "Design the overall system architecture for the URL shortener service. Define microservice boundaries (URL service, redirect service, analytics service, auth service). Produce architecture diagrams showing component interactions, data flows, caching strategy (Redis for hot redirects), async analytics pipeline (e.g., Kafka/SQS), PostgreSQL schema overview, API gateway placement, rate limiting layer, and cloud deployment topology (Kubernetes on AWS/GCP/Azure). Document HA strategy, horizontal scaling approach, and 99.9% uptime SLA design decisions. Define the Base62 7-character code generation strategy (hash vs. distributed counter with Snowflake IDs). Specify GDPR compliance boundaries and data retention policies.",
+        "agent": "architect",
+        "dependencies": [],
+        "status": "pending",
+        "inputs": {},
+        "outputs": {},
+        "retry_count": 0,
+        "max_retries": 2,
+        "error_message": null
+      },
+      {
+        "id": "task-002",
+        "name": "Security and Auth Architecture",
+        "description": "Design the authentication and authorization model. Define API key generation, hashing (bcrypt/SHA-256), and storage strategy. Design multi-tenant isolation model where each tenant is identified by an API key. Specify OAuth2 token flow for optional user accounts. Define rate limiting rules per API key (creation: 1,000/sec, redirect: 10,000/sec) using token bucket or sliding window algorithm in Redis. Design GDPR-compliant PII handling: IP anonymization, consent flags, data deletion workflows. Specify TLS termination points and secrets management approach (Vault/AWS Secrets Manager).",
+        "agent": "architect",
+        "dependencies": [],
+        "status": "pending",
+        "inputs": {},
+        "outputs": {},
+        "retry_count": 0,
+        "max_retries": 2,
+        "error_message": null
+      },
+      {
+        "id": "task-003",
+        "name": "Database Schema and Data Models",
+        "description": "Design and implement PostgreSQL database schemas and ORM models. Tables required: (1) tenants/api_keys with hashed_key, owner_email, created_at, rate_limit_tier; (2) short_urls with id, short_code (unique indexed), long_url, tenant_id (FK), custom_alias, created_at, expires_at, is_active, deleted_at; (3) click_events with id, short_url_id (FK), clicked_at, ip_address_hash, user_agent, referrer, country_code; (4) analytics_summaries with short_url_id, date, click_count, unique_ips. Define indexes: short_code B-tree index for O(1) lookups, composite index on (tenant_id, created_at) for listing, partial index on active non-expired URLs. Include migration scripts (Flyway/Alembic). Define Redis data structures: string key 'url:{short_code}' -> JSON payload with long_url and expiry TTL.",
+        "agent": "code_generator",
+        "dependencies": [
+          "task-001"
+        ],
+        "status": "pending",
+        "inputs": {},
+        "outputs": {},
+        "retry_count": 0,
+        "max_retries": 2,
+        "error_message": null
+      },
+      {
+        "id": "task-004",
+        "name": "REST API Contract and OpenAPI Specification",
+        "description": "Define the complete OpenAPI 3.0 specification for all service endpoints. Endpoints: POST /v1/urls (create short URL with optional custom alias, TTL), GET /v1/urls/{short_code} (resolve/redirect, 301/302), DELETE /v1/urls/{short_code} (deactivate), GET /v1/urls (list URLs for tenant with pagination), POST /v1/urls/batch (bulk creation up to 100 URLs), GET /v1/analytics/{short_code} (retrieve click analytics with date range filter), GET /v1/analytics/{short_code}/summary (aggregated stats). Define request/response schemas, error codes (400 validation, 401 auth, 404 not found, 409 conflict for alias collision, 410 gone for expired, 429 rate limit), pagination envelope, and authentication header (X-API-Key). Document rate limit response headers (X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After).",
+        "agent": "architect",
+        "dependencies": [
+          "task-001",
+          "task-002"
+        ],
+        "status": "pending",
+        "inputs": {},
+        "outputs": {},
+        "retry_count": 0,
+        "max_retries": 2,
+        "error_message": null
+      },
+      {
+        "id": "task-005",
+        "name": "Core URL Service Implementation",
+        "description": "Implement the core URL management service. Components: (1) URL code generator using Base62 encoding of a distributed counter (Redis INCR or Snowflake ID) with collision detection fallback; custom alias validator (regex, reserved word blocklist, uniqueness check); (2) URL creation handler: validate long URL format (RFC 3986) and reachability (async HEAD request with 5s timeout), persist to PostgreSQL, populate Redis cache with TTL matching URL expiry; (3) URL listing handler with cursor-based pagination filtered by tenant_id; (4) URL deactivation handler: soft-delete in PostgreSQL, invalidate Redis cache entry; (5) Batch URL creation handler with transactional bulk insert and partial failure reporting; (6) URL expiry enforcement: background job to mark expired URLs inactive and evict from cache. Use connection pooling (PgBouncer) and implement retry logic with exponential backoff for DB writes.",
+        "agent": "code_generator",
+        "dependencies": [
+          "task-003",
+          "task-004"
+        ],
+        "status": "pending",
+        "inputs": {},
+        "outputs": {},
+        "retry_count": 0,
+        "max_retries": 2,
+        "error_message": null
+      },
+      {
+        "id": "task-006",
+        "name": "High-Performance Redirect Service Implementation",
+        "description": "Implement the redirect service optimized for sub-50ms p99 latency. Architecture: Redis-first lookup with PostgreSQL fallback. Flow: (1) Extract short_code from request path; (2) Check Redis cache 'url:{short_code}' - on hit, validate TTL/active status, emit async analytics event, return 301/302 redirect; (3) On cache miss, query PostgreSQL with read replica, check is_active and expires_at, populate Redis cache, emit analytics event, return redirect; (4) Return 404 for unknown codes, 410 Gone for expired/deactivated URLs. Analytics emission: publish click event (short_code, timestamp, hashed IP, user-agent, referrer) to async queue (Kafka topic or AWS SQS) - fire-and-forget, never blocks redirect. Implement circuit breaker for PostgreSQL fallback. Configure HTTP response headers: Cache-Control, X-Cache-Status. Target: Redis hit path < 5ms, DB fallback path < 30ms.",
+        "agent": "code_generator",
+        "dependencies": [
+          "task-003",
+          "task-004"
+        ],
+        "status": "pending",
+        "inputs": {},
+        "outputs": {},
+        "retry_count": 0,
+        "max_retries": 2,
+        "error_message": null
+      },
+      {
+        "id": "task-007",
+        "name": "Analytics Pipeline Implementation",
+        "description": "Implement the asynchronous analytics collection and query pipeline. Components: (1) Event consumer: Kafka/SQS consumer that reads click events, performs IP geolocation lookup (MaxMind GeoLite2), anonymizes IP (store only /24 subnet or hashed), writes to click_events table in batches (bulk insert every 1s or 500 events); (2) Aggregation job: scheduled job (every 15 min) that computes daily summaries into analytics_summaries table; (3) Analytics query API handler: GET /v1/analytics/{short_code} returns paginated click_events (filtered by date range, max 90-day window), GET /v1/analytics/{short_code}/summary returns pre-aggregated daily counts, top referrers, top user agents, geographic distribution; (4) Data retention enforcer: daily job to delete click_events older than 90 days (GDPR compliance), retain analytics_summaries indefinitely; (5) GDPR deletion handler: on URL deletion, anonymize associated click_events. Ensure analytics writes never impact redirect latency.",
+        "agent": "code_generator",
+        "dependencies": [
+          "task-005",
+          "task-006"
+        ],
+        "status": "pending",
+        "inputs": {},
+        "outputs": {},
+        "retry_count": 0,
+        "max_retries": 2,
+        "error_message": null
+      }
+    ],
+    "execution_order": [
+      [
+        "task-002",
+        "task-001"
+      ],
+      [
+        "task-003",
+        "task-004"
+      ],
+      [
+        "task-005",
+        "task-006"
+      ],
+      [
+        "task-007"
+      ]
+    ]
+  },
+  "code_artifacts": [
+    {
+      "filename": "models.py",
+      "filepath": "snaplink/models.py",
+      "language": "python",
+      "content": "\"\"\"\nSnapLink Data Models\nDefines SQLAlchemy ORM models for ShortURL and ApiKey entities.\nUsed by the Analytics Query Service and shared across Python-based services.\n\"\"\"\n\nimport enum\nimport uuid\nfrom datetime import datetime\nfrom typing import List, Optional\n\nfrom sqlalchemy import (\n    Boolean,\n    Column,\n    DateTime,\n    Enum,\n    ForeignKey,\n    Index,\n    Integer,\n    String,\n    Text,\n    UniqueConstraint,\n)\nfrom sqlalchemy.dialects.postgresql import ARRAY, UUID\nfrom sqlalchemy.orm import DeclarativeBase, relationship\nfrom sqlalchemy.sql import func\n\n\nclass Base(DeclarativeBase):\n    \"\"\"Base class for all ORM models.\"\"\"\n    pass\n\n\nclass URLStatus(str, enum.Enum):\n    \"\"\"Lifecycle status of a shortened URL.\"\"\"\n    ACTIVE = \"active\"\n    DEACTIVATED = \"deactivated\"\n    EXPIRED = \"expired\"\n\n\nclass ValidationStatus(str, enum.Enum):\n    \"\"\"Reachability validation state of a shortened URL.\"\"\"\n    PENDING = \"pending\"\n    VALID = \"valid\"\n    UNREACHABLE = \"unreachable\"\n\n\nclass ShortURL(Base):\n    \"\"\"\n    Core entity representing a shortened URL record.\n\n    Stores the mapping between a short code (or custom alias) and the\n    original long URL, along with ownership, expiration, and status metadata.\n    The long_url column is encrypted at rest via pgcrypto in production.\n    \"\"\"\n    __tablename__ = \"short_urls\"\n\n    id: uuid.UUID = Column(\n        UUID(as_uuid=True),\n        primary_key=True,\n        default=uuid.uuid4,\n        server_default=func.gen_random_uuid(),\n        comment=\"Primary key, UUID v4\",\n    )\n    short_code: str = Column(\n        String(50),\n        nullable=False,\n        unique=True,\n        index=True,\n        comment=\"7-char Base62 code or custom alias; globally unique\",\n    )\n    long_url: str = Column(\n        Text,\n        nullable=False,\n        comment=\"Original destination URL; encrypted at rest via pgcrypto\",\n    )\n    owner_api_key_id: uuid.UUID = Column(\n        UUID(as_uuid=True),\n        ForeignKey(\"api_keys.id\", ondelete=\"CASCADE\"),\n        nullable=False,\n        index=True,\n        comment=\"FK to ApiKey; determines tenant ownership\",\n    )\n    status: URLStatus = Column(\n        Enum(URLStatus, name=\"url_status_enum\"),\n        nullable=False,\n        default=URLStatus.ACTIVE,\n        server_default=\"active\",\n        index=True,\n        comment=\"Lifecycle state: active | deactivated | expired\",\n    )\n    is_custom_alias: bool = Column(\n        Boolean,\n        nullable=False,\n        default=False,\n        server_default=\"false\",\n        comment=\"True when the short_code was user-supplied\",\n    )\n    ttl_seconds: Optional[int] = Column(\n        Integer,\n        nullable=True,\n        comment=\"Time-to-live in seconds; NULL means no expiry\",\n    )\n    expires_at: Optional[datetime] = Column(\n        DateTime(timezone=True),\n        nullable=True,\n        index=True,\n        comment=\"Computed expiry timestamp; indexed for sweep queries\",\n    )\n    tags: Optional[List[str]] = Column(\n        ARRAY(Text),\n        nullable=True,\n        comment=\"Owner-defined labels for organisation\",\n    )\n    created_at: datetime = Column(\n        DateTime(timezone=True),\n        nullable=False,\n        server_default=func.now(),\n        comment=\"Record creation timestamp\",\n    )\n    updated_at: datetime = Column(\n        DateTime(timezone=True),\n        nullable=False,\n        server_default=func.now(),\n        onupdate=func.now(),\n        comment=\"Last modification timestamp\",\n    )\n    deleted_at: Optional[datetime] = Column(\n        DateTime(timezone=True),\n        nullable=True,\n        comment=\"Soft-delete timestamp; NULL means not deleted\",\n    )\n    validation_status: ValidationStatus = Column(\n        Enum(ValidationStatus, name=\"validation_status_enum\"),\n        nullable=False,\n        default=ValidationStatus.PENDING,\n        server_default=\"pending\",\n        comment=\"Async reachability check result\",\n    )\n\n    # Relationship back to the owning API key\n    owner: \"ApiKey\" = relationship(\"ApiKey\", back_populates=\"short_urls\")\n\n    __table_args__ = (\n        # Composite index for tenant-scoped listing queries\n        Index(\"ix_short_urls_owner_status\", \"owner_api_key_id\", \"status\"),\n        # Partial index for expiry sweep \u2014 only rows that can expire\n        Index(\n            \"ix_short_urls_expires_at_active\",\n            \"expires_at\",\n            postgresql_where=(Column(\"expires_at\").isnot(None)),\n        ),\n    )\n\n    def __repr__(self) -> str:\n        return f\"<ShortURL code={self.short_code!r} status={self.status}>\"\n\n    @property\n    def is_expired(self) -> bool:\n        \"\"\"Runtime expiry check independent of the persisted status field.\"\"\"\n        if self.expires_at is None:\n            return False\n        return datetime.utcnow() > self.expires_at.replace(tzinfo=None)\n\n    @property\n    def is_accessible(self) -> bool:\n        \"\"\"True only when the URL can serve redirects.\"\"\"\n        return self.status == URLStatus.ACTIVE and not self.is_expired\n\n\nclass ApiKey(Base):\n    \"\"\"\n    Represents a tenant API key used for authentication and rate limiting.\n\n    Raw API keys are never stored; only the SHA-256 hash is persisted.\n    The key_prefix (first 8 chars) is stored in plaintext for display.\n    owner_email is encrypted at rest via pgcrypto in production.\n    \"\"\"\n    __tablename__ = \"api_keys\"\n\n    id: uuid.UUID = Column(\n        UUID(as_uuid=True),\n        primary_key=True,\n        default=uuid.uuid4,\n        server_default=func.gen_random_uuid(),\n    )\n    key_hash: str = Column(\n        String(64),\n        nullable=False,\n        unique=True,\n        comment=\"SHA-256 hex digest of the raw API key\",\n    )\n    key_prefix: str = Column(\n        String(8),\n        nullable=False,\n        comment=\"First 8 chars of raw key for identification (e.g. snpl_abc1)\",\n    )\n    owner_email: Optional[str] = Column(\n        String(320),\n        nullable=True,\n        comment=\"Tenant contact email; encrypted at rest\",\n    )\n    tenant_id: uuid.UUID = Column(\n        UUID(as_uuid=True),\n        nullable=False,\n        index=True,\n        comment=\"Logical tenant grouping for multi-tenant isolation\",\n    )\n    rate_limit_rpm: int = Column(\n        Integer,\n        nullable=False,\n        default=1000,\n        server_default=\"1000\",\n        comment=\"Max URL creation requests per minute\",\n    )\n    rate_limit_rps_redirect: int = Column(\n        Integer,\n        nullable=False,\n        default=500,\n        server_default=\"500\",\n        comment=\"Max redirect requests per second\",\n    )\n    is_active: bool = Column(\n        Boolean,\n        nullable=False,\n        default=True,\n        server_default=\"true\",\n    )\n    scopes: List[str] = Column(\n        ARRAY(Text),\n        nullable=False,\n        comment=\"Permission scopes e.g. ['url:create','analytics:read']\",\n    )\n    created_at: datetime = Column(\n        DateTime(timezone=True),\n        nullable=False,\n        server_default=func.now(),\n    )\n    last_used_at: Optional[datetime] = Column(\n        DateTime(timezone=True),\n        nullable=True,\n        comment=\"Updated on each authenticated request\",\n    )\n    expires_at: Optional[datetime] = Column(\n        DateTime(timezone=True),\n        nullable=True,\n        comment=\"Key expiry; NULL means never expires\",\n    )\n\n    # One API key owns many short URLs\n    short_urls: List[ShortURL] = relationship(\n        \"ShortURL\", back_populates=\"owner\", cascade=\"all, delete-orphan\"\n    )\n\n    __table_args__ = (\n        UniqueConstraint(\"key_hash\", name=\"uq_api_keys_key_hash\"),\n    )\n\n    def __repr__(self) -> str:\n        return f\"<ApiKey prefix={self.key_prefix!r} tenant={self.tenant_id}>\"\n\n    @property\n    def is_valid(self) -> bool:\n        \"\"\"True when the key is active and not expired.\"\"\"\n        if not self.is_active:\n            return False\n        if self.expires_at and datetime.utcnow() > self.expires_at.replace(tzinfo=None):\n            return False\n        return True\n\n\nclass ClickEvent(Base):\n    \"\"\"\n    TimescaleDB hypertable for raw click events.\n\n    Partitioned by time (created_at) via TimescaleDB extension.\n    Raw events are purged after 90 days by the scheduled Lambda job.\n    IP addresses are stored as truncated/hashed values for GDPR compliance.\n    \"\"\"\n    __tablename__ = \"click_events\"\n\n    id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)\n    short_code: str = Column(\n        String(50),\n        nullable=False,\n        index=True,\n        comment=\"Denormalised short code for fast time-series queries\",\n    )\n    short_url_id: uuid.UUID = Column(\n        UUID(as_uuid=True),\n        nullable=False,\n        index=True,\n        comment=\"FK to short_urls.id (not enforced as FK for TimescaleDB perf)\",\n    )\n    tenant_id: uuid.UUID = Column(\n        UUID(as_uuid=True),\n        nullable=False,\n        index=True,\n        comment=\"Denormalised tenant_id for isolation without joins\",\n    )\n    # GDPR-compliant: store only the /24 subnet prefix (last octet zeroed)\n    ip_prefix: Optional[str] = Column(\n        String(45),\n        nullable=True,\n        comment=\"Anonymised IP: IPv4 /24 prefix or IPv6 /48 prefix\",\n    )\n    user_agent: Optional[str] = Column(Text, nullable=True)\n    referrer: Optional[str] = Column(Text, nullable=True)\n    country_code: Optional[str] = Column(\n        String(2),\n        nullable=True,\n        comment=\"ISO 3166-1 alpha-2 from MaxMind GeoIP2\",\n    )\n    browser: Optional[str] = Column(String(64), nullable=True)\n    os: Optional[str] = Column(String(64), nullable=True)\n    created_at: datetime = Column(\n        DateTime(timezone=True),\n        nullable=False,\n        server_default=func.now(),\n        index=True,\n        comment=\"TimescaleDB partition key\",\n    )\n\n    __table_args__ = (\n        # Composite index for tenant-scoped time-series queries\n        Index(\"ix_click_events_short_code_time\", \"short_code\", \"created_at\"),\n        Index(\"ix_click_events_tenant_time\", \"tenant_id\", \"created_at\"),\n    )\n\n    def __repr__(self) -> str:\n        return f\"<ClickEvent short_code={self.short_code!r} at={self.created_at}>\"\n",
+      "description": "SQLAlchemy ORM models for ShortURL, ApiKey, and ClickEvent entities with full column definitions, indexes, constraints, and business logic properties."
+    },
+    {
+      "filename": "config.py",
+      "filepath": "snaplink/config.py",
+      "language": "python",
+      "content": "\"\"\"\nSnapLink Configuration\nCentralised settings management using Pydantic BaseSettings.\nAll secrets are injected via environment variables; no hardcoded credentials.\n\"\"\"\n\nfrom functools import lru_cache\nfrom typing import List, Optional\n\nfrom pydantic import AnyUrl, Field, PostgresDsn, RedisDsn, field_validator\nfrom pydantic_settings import BaseSettings, SettingsConfigDict\n\n\nclass Settings(BaseSettings):\n    \"\"\"\n    Application settings loaded from environment variables.\n    Pydantic validates types and raises on startup if required vars are missing.\n    \"\"\"\n\n    model_config = SettingsConfigDict(\n        env_file=\".env\",\n        env_file_encoding=\"utf-8\",\n        case_sensitive=False,\n        extra=\"ignore\",\n    )\n\n    # -------------------------------------------------------------------------\n    # Application\n    # -------------------------------------------------------------------------\n    app_name: str = Field(default=\"SnapLink\", description=\"Service display name\")\n    app_version: str = Field(default=\"1.0.0\")\n    environment: str = Field(\n        default=\"production\",\n        description=\"One of: development | staging | production\",\n    )\n    debug: bool = Field(default=False, description=\"Enable debug logging\")\n    log_level: str = Field(default=\"INFO\")\n\n    # Base URL used to construct full short URLs in API responses\n    base_url: str = Field(\n        default=\"https://snpl.ink\",\n        description=\"Public-facing base URL for short links\",\n    )\n\n    # -------------------------------------------------------------------------\n    # PostgreSQL (Aurora PostgreSQL 15 via PgBouncer)\n    # -------------------------------------------------------------------------\n    database_url: PostgresDsn = Field(\n        ...,\n        description=\"Async PostgreSQL DSN (asyncpg driver) via PgBouncer\",\n        examples=[\"postgresql+asyncpg://user:pass@pgbouncer:5432/snaplink\"],\n    )\n    database_pool_size: int = Field(default=20, ge=1, le=100)\n    database_max_overflow: int = Field(default=10, ge=0, le=50)\n    database_pool_timeout: int = Field(default=30, ge=5)\n    database_pool_recycle: int = Field(\n        default=1800,\n        description=\"Recycle connections every 30 min to avoid stale connections\",\n    )\n\n    # Read replica DSN for analytics queries (Aurora reader endpoint)\n    database_read_url: Optional[PostgresDsn] = Field(\n        default=None,\n        description=\"Read-only replica DSN for analytics queries\",\n    )\n\n    # -------------------------------------------------------------------------\n    # TimescaleDB (click events time-series)\n    # -------------------------------------------------------------------------\n    timescale_url: Optional[PostgresDsn] = Field(\n        default=None,\n        description=\"TimescaleDB DSN for click event storage and queries\",\n    )\n\n    # -------------------------------------------------------------------------\n    # Redis (ElastiCache 7.x cluster mode)\n    # -------------------------------------------------------------------------\n    redis_url: RedisDsn = Field(\n        ...,\n        description=\"Redis DSN for cache, rate limiting, and Celery broker\",\n        examples=[\"rediss://user:pass@cluster.cache.amazonaws.com:6380/0\"],\n    )\n    redis_max_connections: int = Field(default=50, ge=5)\n    redis_socket_timeout: float = Field(default=0.5, description=\"Seconds\")\n    redis_socket_connect_timeout: float = Field(default=1.0, description=\"Seconds\")\n\n    # TTL for cached URL records in Redis (seconds)\n    redis_url_cache_ttl: int = Field(\n        default=3600,\n        description=\"Default TTL for short_code->URL cache entries (1 hour)\",\n    )\n    # TTL for analytics summary cache\n    redis_analytics_cache_ttl: int = Field(\n        default=60,\n        description=\"TTL for cached analytics summaries (60 seconds)\",\n    )\n\n    # -------------------------------------------------------------------------\n    # Kafka (Amazon MSK)\n    # -------------------------------------------------------------------------\n    kafka_bootstrap_servers: str = Field(\n        ...,\n        description=\"Comma-separated Kafka broker addresses\",\n        examples=[\"b-1.msk.amazonaws.com:9092,b-2.msk.amazonaws.com:9092\"],\n    )\n    kafka_click_events_topic: str = Field(\n        default=\"snaplink.click-events\",\n        description=\"Topic for raw click events from Redirect Service\",\n    )\n    kafka_security_protocol: str = Field(default=\"SASL_SSL\")\n    kafka_sasl_mechanism: str = Field(default=\"AWS_MSK_IAM\")\n    kafka_producer_acks: str = Field(\n        default=\"1\",\n        description=\"Producer ack level: 0=none, 1=leader, all=full ISR\",\n    )\n    kafka_producer_linger_ms: int = Field(\n        default=5,\n        description=\"Batch linger time for producer throughput optimisation\",\n    )\n\n    # -------------------------------------------------------------------------\n    # URL Shortener\n    # -------------------------------------------------------------------------\n    short_code_length: int = Field(\n        default=7,\n        description=\"Length of generated Base62 short codes\",\n    )\n    max_collision_retries: int = Field(\n        default=3,\n        description=\"Max Base62 counter retries before falling back to random entropy\",\n    )\n    url_reachability_timeout: float = Field(\n        default=3.0,\n        description=\"HTTP HEAD request timeout for URL validation (seconds)\",\n    )\n    max_batch_size: int = Field(\n        default=100,\n        description=\"Maximum URLs per batch creation request\",\n    )\n    max_custom_alias_length: int = Field(default=50)\n    min_custom_alias_length: int = Field(default=3)\n\n    # Redis key for the distributed counter used in Base62 generation\n    redis_counter_key: str = Field(default=\"snaplink:global:url_counter\")\n\n    # -------------------------------------------------------------------------\n    # Rate Limiting\n    # -------------------------------------------------------------------------\n    default_rate_limit_rpm: int = Field(\n        default=1000,\n        description=\"Default URL creation rate limit (requests per minute)\",\n    )\n    default_rate_limit_rps_redirect: int = Field(\n        default=500,\n        description=\"Default redirect rate limit (requests per second)\",\n    )\n\n    # -------------------------------------------------------------------------\n    # Celery / Background Workers\n    # -------------------------------------------------------------------------\n    celery_broker_url: Optional[str] = Field(\n        default=None,\n        description=\"Celery broker URL; defaults to redis_url if not set\",\n    )\n    celery_result_backend: Optional[str] = Field(\n        default=None,\n        description=\"Celery result backend; defaults to redis_url if not set\",\n    )\n    celery_task_serializer: str = Field(default=\"json\")\n    celery_result_serializer: str = Field(default=\"json\")\n    celery_task_acks_late: bool = Field(\n        default=True,\n        description=\"Acknowledge tasks only after completion for at-least-once delivery\",\n    )\n    celery_worker_prefetch_multiplier: int = Field(default=1)\n\n    # -------------------------------------------------------------------------\n    # Security\n    # -------------------------------------------------------------------------\n    api_key_prefix: str = Field(\n        default=\"snpl_\",\n        description=\"Prefix for all generated API keys\",\n    )\n    # CORS allowed origins for the analytics API\n    cors_allowed_origins: List[str] = Field(\n        default=[\"https://app.snpl.ink\"],\n        description=\"Allowed CORS origins\",\n    )\n\n    # -------------------------------------------------------------------------\n    # Observability\n    # -------------------------------------------------------------------------\n    sentry_dsn: Optional[str] = Field(default=None)\n    otel_exporter_otlp_endpoint: Optional[str] = Field(\n        default=None,\n        description=\"OpenTelemetry collector endpoint for distributed tracing\",\n    )\n    metrics_port: int = Field(\n        default=9090,\n        description=\"Prometheus metrics exposition port\",\n    )\n\n    @field_validator(\"environment\")\n    @classmethod\n    def validate_environment(cls, v: str) -> str:\n        allowed = {\"development\", \"staging\", \"production\"}\n        if v not in allowed:\n            raise ValueError(f\"environment must be one of {allowed}\")\n        return v\n\n    @field_validator(\"log_level\")\n    @classmethod\n    def validate_log_level(cls, v: str) -> str:\n        allowed = {\"DEBUG\", \"INFO\", \"WARNING\", \"ERROR\", \"CRITICAL\"}\n        v_upper = v.upper()\n        if v_upper not in allowed:\n            raise ValueError(f\"log_level must be one of {allowed}\")\n        return v_upper\n\n    @property\n    def effective_celery_broker(self) -> str:\n        \"\"\"Celery broker falls back to the main Redis URL.\"\"\"\n        return self.celery_broker_url or str(self.redis_url)\n\n    @property\n    def effective_celery_backend(self) -> str:\n        \"\"\"Celery result backend falls back to the main Redis URL.\"\"\"\n        return self.celery_result_backend or str(self.redis_url)\n\n    @property\n    def is_production(self) -> bool:\n        return self.environment == \"production\"\n\n\n@lru_cache(maxsize=1)\ndef get_settings() -> Settings:\n    \"\"\"\n    Return a cached singleton Settings instance.\n    The lru_cache ensures settings are parsed only once per process lifetime.\n    Use dependency injection in FastAPI via Depends(get_settings).\n    \"\"\"\n    return Settings()\n",
+      "description": "Centralised Pydantic-based settings management covering database, Redis, Kafka, Celery, security, and observability configuration with environment variable injection."
+    }
+  ],
+  "test_suite": {
+    "test_cases": [
+      {
+        "name": "test_create_short_url_success",
+        "description": "Unit test: POST /api/v1/urls returns 201 with short_code when valid URL is provided",
+        "test_type": "unit",
+        "code": "import pytest\nfrom unittest.mock import AsyncMock, patch, MagicMock\n\n@pytest.mark.asyncio\nasync def test_create_short_url_success(async_client):\n    payload = {\"original_url\": \"https://example.com/some/long/path\", \"tenant_id\": \"tenant-1\"}\n    mock_url = MagicMock(short_code=\"abc123\", original_url=payload[\"original_url\"], is_active=True)\n\n    with patch(\"app.services.url_service.create_short_url\", new=AsyncMock(return_value=mock_url)):\n        response = await async_client.post(\"/api/v1/urls\", json=payload, headers={\"X-API-Key\": \"valid-key\"})\n\n    assert response.status_code == 201\n    data = response.json()\n    assert \"short_code\" in data\n    assert data[\"short_code\"] == \"abc123\"\n    assert data[\"original_url\"] == payload[\"original_url\"]"
+      },
+      {
+        "name": "test_create_short_url_invalid_url_returns_422",
+        "description": "Unit test: POST /api/v1/urls returns 422 when original_url is not a valid URL",
+        "test_type": "unit",
+        "code": "import pytest\nfrom unittest.mock import AsyncMock, patch\n\n@pytest.mark.asyncio\nasync def test_create_short_url_invalid_url_returns_422(async_client):\n    payload = {\"original_url\": \"not-a-valid-url\", \"tenant_id\": \"tenant-1\"}\n\n    with patch(\"app.services.url_service.create_short_url\", new=AsyncMock()) as mock_svc:\n        response = await async_client.post(\"/api/v1/urls\", json=payload, headers={\"X-API-Key\": \"valid-key\"})\n\n    assert response.status_code == 422\n    mock_svc.assert_not_called()\n    errors = response.json()[\"detail\"]\n    assert any(\"url\" in str(e).lower() for e in errors)"
+      },
+      {
+        "name": "test_redirect_short_code_cache_hit",
+        "description": "Unit test: GET /{short_code} returns 302 redirect using Redis cache without hitting the database",
+        "test_type": "unit",
+        "code": "import pytest\nfrom unittest.mock import AsyncMock, patch\n\n@pytest.mark.asyncio\nasync def test_redirect_short_code_cache_hit(async_client):\n    target_url = \"https://example.com/destination\"\n\n    with patch(\"app.cache.redis_client.get\", new=AsyncMock(return_value=target_url)) as mock_cache, \\\n         patch(\"app.services.url_service.get_url_by_code\", new=AsyncMock()) as mock_db, \\\n         patch(\"app.kafka.producer.send\", new=AsyncMock()):\n        response = await async_client.get(\"/abc123\", allow_redirects=False)\n\n    assert response.status_code == 302\n    assert response.headers[\"location\"] == target_url\n    mock_cache.assert_called_once_with(\"abc123\")\n    mock_db.assert_not_called()"
+      },
+      {
+        "name": "test_redirect_short_code_not_found_returns_404",
+        "description": "Unit test: GET /{short_code} returns 404 when code is absent from both cache and database",
+        "test_type": "unit",
+        "code": "import pytest\nfrom unittest.mock import AsyncMock, patch\n\n@pytest.mark.asyncio\nasync def test_redirect_short_code_not_found_returns_404(async_client):\n    with patch(\"app.cache.redis_client.get\", new=AsyncMock(return_value=None)), \\\n         patch(\"app.services.url_service.get_url_by_code\", new=AsyncMock(return_value=None)):\n        response = await async_client.get(\"/nonexistent\", allow_redirects=False)\n\n    assert response.status_code == 404\n    assert response.json()[\"detail\"] == \"Short URL not found\""
+      },
+      {
+        "name": "test_batch_create_urls_success",
+        "description": "Integration test: POST /api/v1/urls/batch creates multiple short URLs and returns all results",
+        "test_type": "integration",
+        "code": "import pytest\nfrom unittest.mock import AsyncMock, patch, MagicMock\n\n@pytest.mark.asyncio\nasync def test_batch_create_urls_success(async_client):\n    urls = [\"https://site.com/page1\", \"https://site.com/page2\", \"https://site.com/page3\"]\n    payload = {\"urls\": [{\"original_url\": u} for u in urls], \"tenant_id\": \"tenant-1\"}\n    mock_results = [MagicMock(short_code=f\"code{i}\", original_url=u) for i, u in enumerate(urls)]\n\n    with patch(\"app.services.url_service.batch_create_short_urls\", new=AsyncMock(return_value=mock_results)):\n        response = await async_client.post(\"/api/v1/urls/batch\", json=payload, headers={\"X-API-Key\": \"valid-key\"})\n\n    assert response.status_code == 201\n    data = response.json()\n    assert len(data[\"results\"]) == 3\n    assert all(\"short_code\" in r for r in data[\"results\"])"
+      },
+      {
+        "name": "test_get_analytics_returns_click_stats",
+        "description": "Integration test: GET /api/v1/urls/{short_code}/analytics returns aggregated click event data",
+        "test_type": "integration",
+        "code": "import pytest\nfrom unittest.mock import AsyncMock, patch, MagicMock\nfrom datetime import datetime\n\n@pytest.mark.asyncio\nasync def test_get_analytics_returns_click_stats(async_client):\n    mock_analytics = MagicMock(\n        short_code=\"abc123\",\n        total_clicks=42,\n        unique_clicks=30,\n        last_clicked_at=datetime(2024, 1, 15, 12, 0, 0)\n    )\n    with patch(\"app.services.analytics_service.get_url_analytics\", new=AsyncMock(return_value=mock_analytics)):\n        response = await async_client.get(\"/api/v1/urls/abc123/analytics\", headers={\"X-API-Key\": \"valid-key\"})\n\n    assert response.status_code == 200\n    data = response.json()\n    assert data[\"total_clicks\"] == 42\n    assert data[\"unique_clicks\"] == 30\n    assert \"last_clicked_at\" in data"
+      },
+      {
+        "name": "test_delete_short_url_and_cache_invalidation",
+        "description": "Integration test: DELETE /api/v1/urls/{short_code} removes the record and evicts the Redis cache entry",
+        "test_type": "integration",
+        "code": "import pytest\nfrom unittest.mock import AsyncMock, patch\n\n@pytest.mark.asyncio\nasync def test_delete_short_url_and_cache_invalidation(async_client):\n    with patch(\"app.services.url_service.delete_short_url\", new=AsyncMock(return_value=True)) as mock_delete, \\\n         patch(\"app.cache.redis_client.delete\", new=AsyncMock()) as mock_cache_del:\n        response = await async_client.delete(\"/api/v1/urls/abc123\", headers={\"X-API-Key\": \"valid-key\"})\n\n    assert response.status_code == 204\n    mock_delete.assert_awaited_once_with(\"abc123\")\n    mock_cache_del.assert_awaited_once_with(\"abc123\")"
+      }
+    ],
+    "coverage_estimate": "~78% coverage across the six API endpoints. Covers: happy-path URL creation (single + batch), cache-hit redirect flow, cache-miss 404 redirect, analytics retrieval, and delete with cache invalidation. Not covered: authentication middleware internals, Kafka producer failure handling, database connection errors, and the ShortURL/ApiKey/ClickEvent ORM model property logic directly.",
+    "testing_strategy": "The suite uses a two-tier strategy. Unit tests mock all I/O boundaries (Redis, PostgreSQL via service layer, Kafka producer) to isolate routing and validation logic, keeping tests fast and deterministic. Integration tests exercise the full request/response cycle through the ASGI app (via httpx AsyncClient) while still mocking external infrastructure, validating that service orchestration, response serialisation, and HTTP status codes are correct end-to-end. Async support is provided by pytest-asyncio. An async_client fixture (not shown) should wrap the FastAPI app with httpx.AsyncClient and inject a pre-validated API key header by default."
+  },
+  "validation": {
+    "is_valid": true,
+    "risks": [
+      {
+        "category": "Security",
+        "description": "API key exposure and tenant isolation bypass: API keys stored in Redis for rate limiting sliding windows and used as tenant identifiers could be enumerated or brute-forced if not properly hashed. A compromised API key grants full tenant access including analytics, URL management, and deletion. The Lambda authorizer caching behavior in API Gateway (default 300s TTL) means revoked keys remain valid for up to 5 minutes post-revocation.",
+        "severity": "critical",
+        "mitigation": "Store only HMAC-SHA256 hashes of API keys in the database; compare hashes at validation time. Implement Lambda authorizer with a context-aware cache key that includes a revocation version counter stored in Redis, allowing instant invalidation by incrementing the counter. Add API key scoping (read-only, write, admin) enforced at the authorizer level. Rate-limit failed authentication attempts per IP at WAF level (e.g., block after 20 failures in 60 seconds).",
+        "likelihood": "medium"
+      },
+      {
+        "category": "Security",
+        "description": "URL reachability validation SSRF vulnerability: The URL Shortener Service uses axios with a 3-second timeout to validate URL reachability. This creates a Server-Side Request Forgery vector where attackers can submit URLs pointing to internal AWS metadata endpoints (169.254.169.254), internal VPC services, or localhost to probe the internal network topology or extract IAM credentials.",
+        "severity": "critical",
+        "mitigation": "Implement a strict URL allowlist/denylist before making any outbound HTTP request: block RFC-1918 private ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), loopback (127.0.0.0/8), link-local (169.254.0.0/16), and IPv6 equivalents. Resolve the hostname to IP before connecting and re-validate the resolved IP. Run reachability checks from a dedicated isolated Lambda or ECS task with no VPC access and outbound-only internet egress. Disable HTTP redirects in axios to prevent redirect-based SSRF bypass.",
+        "likelihood": "high"
+      },
+      {
+        "category": "Data Integrity",
+        "description": "Distributed counter collision under Redis failover: The Base62 code generation relies on Redis atomic counters (INCR). During Redis cluster failover, shard rebalancing, or ElastiCache node replacement, counter state may be lost or reset, causing counter reuse and short code collisions. The 3-retry collision detection with PostgreSQL unique constraint fallback mitigates this partially but does not prevent duplicate counter values being issued to concurrent requests during the failover window.",
+        "severity": "high",
+        "mitigation": "Implement counter sharding with a node-local offset: each ECS task is assigned a unique worker ID (from ECS task metadata) and uses a composite counter (worker_id * MAX_COUNTER + local_counter) to ensure global uniqueness without Redis coordination. Persist the last-used counter range to PostgreSQL on graceful shutdown. Add a circuit breaker that falls back to cryptographically random 7-character Base62 codes (with PostgreSQL unique constraint as the collision guard) when Redis is unavailable, logging a metric for observability.",
+        "likelihood": "medium"
+      },
+      {
+        "category": "Performance",
+        "description": "Redis cache stampede on cold start or cache eviction: At 10,000 redirects/sec, a popular short URL evicted from Redis cache (due to TTL expiry or memory pressure) will cause a thundering herd of concurrent PostgreSQL queries for the same key. With 3 shards and 2 replicas each, Aurora read replicas may be overwhelmed if multiple hot URLs expire simultaneously, causing latency spikes and potential connection pool exhaustion in pgx.",
+        "severity": "high",
+        "mitigation": "Implement probabilistic early expiration (PER algorithm): re-cache the URL slightly before TTL expiry using a background goroutine triggered when remaining TTL falls below a threshold (e.g., 10% of original TTL). Add a Redis distributed lock (SET NX with 500ms TTL) per short code during cache miss so only one goroutine queries PostgreSQL while others wait and retry. Set PgBouncer pool_size conservatively (e.g., 20 connections per Fargate task) with a queue timeout to fail fast rather than pile up. Pre-warm cache for top-N URLs by click volume on service startup.",
+        "likelihood": "medium"
+      },
+      {
+        "category": "Availability",
+        "description": "Kafka consumer lag causing analytics data loss during Flink job failures: The Analytics Ingestion Pipeline uses Flink on EMR Serverless to consume from MSK Kafka. If Flink jobs fail or EMR Serverless cold-start latency causes consumer lag to grow, Kafka topic retention limits (default 7 days) may be breached during extended outages, causing permanent loss of click events. Additionally, Flink checkpointing failures can cause event reprocessing leading to duplicate analytics counts.",
+        "severity": "high",
+        "mitigation": "Configure MSK topic retention to 14 days minimum for click event topics. Enable Flink exactly-once semantics with checkpointing every 60 seconds to S3, with checkpoint timeout of 120 seconds. Implement idempotent writes to TimescaleDB using a composite unique key (short_code, event_timestamp, request_id) to deduplicate replayed events. Set up CloudWatch alarms on consumer group lag (alert at 1M messages, page at 5M). Add a dead-letter S3 bucket for events that fail enrichment after 3 retries, with a reprocessing Lambda for manual recovery.",
+        "likelihood": "medium"
+      },
+      {
+        "category": "Operational",
+        "description": "90-day analytics purge job data loss risk: The AWS Lambda scheduled purge job deletes raw click data older than 90 days from TimescaleDB. A misconfigured timestamp comparison (timezone bugs, off-by-one on boundary dates), Lambda timeout during large deletes, or accidental execution against the wrong environment (prod vs staging) could cause premature or excessive data deletion with no recovery path since raw data is not backed up separately.",
+        "severity": "high",
+        "mitigation": "Implement purge as a soft-delete first (set deleted_at timestamp, exclude from queries) with a 7-day grace period before hard deletion. Use TimescaleDB native data retention policies (add_retention_policy) instead of custom Lambda to leverage battle-tested chunk-based deletion. Add a dry-run mode that logs rows to be deleted without executing. Require a manual approval step (SNS confirmation) for purge jobs exceeding 10M rows. Store purge job audit logs (rows deleted, time range, executor) in a separate immutable audit table. Test purge logic in staging with production-scale data monthly.",
+        "likelihood": "low"
+      },
+      {
+        "category": "Scalability",
+        "description": "PgBouncer connection pooling becoming a single point of failure: PgBouncer is deployed as a sidecar per ECS Fargate task. At 1,000 URL creations/sec across multiple Fargate tasks, each task's PgBouncer maintains its own connection pool to Aurora. This can result in Aurora's max_connections being exceeded (Aurora PostgreSQL default is ~5,000 but effective limit with overhead is lower) as the number of Fargate tasks scales out, since each task adds its own pool of connections independently.",
+        "severity": "medium",
+        "mitigation": "Deploy PgBouncer as a shared service (2-3 instances behind an NLB) rather than per-task sidecar, centralizing connection management. Set Aurora max_connections via parameter group based on instance size and enforce it at PgBouncer level (max_client_conn). Use transaction-mode pooling in PgBouncer for the URL creation path (short-lived transactions) and session-mode only where required. Implement RDS Proxy as an additional layer for Aurora connection multiplexing with IAM authentication. Set CloudWatch alarm on Aurora DatabaseConnections metric at 80% of max_connections.",
+        "likelihood": "medium"
+      },
+      {
+        "category": "Security",
+        "description": "Celery task serialization and Redis broker security: The Background Worker Service uses Celery with Redis as broker and result backend. Celery's default pickle serializer allows arbitrary code execution if the Redis broker is compromised or if an attacker can inject malicious task messages. Additionally, Celery result backends in Redis store task results indefinitely by default, potentially leaking sensitive tenant data (URL metadata, API key rotation tokens) if Redis memory is dumped.",
+        "severity": "medium",
+        "mitigation": "Configure Celery to use JSON serializer exclusively (task_serializer='json', accept_content=['json'], result_serializer='json') and reject pickle/yaml. Enable Redis AUTH with a strong password and TLS (already noted for ElastiCache). Set result_expires=3600 (1 hour) to auto-expire task results. Use a dedicated Redis logical database (DB index) or separate ElastiCache cluster for Celery broker, isolated from the redirect cache cluster. Implement task message signing using Celery's built-in HMAC signing with a rotating secret key stored in AWS Secrets Manager.",
+        "likelihood": "low"
+      }
+    ],
+    "trade_offs": [
+      "301 vs 302 redirects: Using HTTP 301 (permanent) improves client-side caching and reduces repeat traffic to the redirect service, but prevents analytics from capturing repeat visits from cached browsers. Using 302 (temporary/found) ensures every redirect is tracked but increases load on the redirect service. The architecture should expose this as a per-URL configuration option, defaulting to 302 for analytics fidelity with 301 available for performance-critical use cases.",
+      "Counter-based vs random Base62 generation: Counter-based generation is sequential and predictable, enabling enumeration attacks where adversaries can iterate through short codes to discover all URLs. Random generation avoids enumeration but requires collision detection. The hybrid approach (counter + worker offset) chosen here trades some unpredictability for collision resistance but should be supplemented with access controls on URL listing endpoints.",
+      "Synchronous URL reachability validation vs async: Validating URL reachability synchronously during creation adds 1-3 seconds of latency per request and introduces SSRF risk. Async validation (via Background Worker) improves creation latency but means invalid URLs may be served briefly. The architecture queues reachability for bulk creation but validates synchronously for single creation, creating inconsistent behavior that should be documented and made configurable.",
+      "Redis cluster mode vs single-node for counters: Cluster mode distributes load but complicates atomic counter operations across slots. The counter key must be pinned to a single shard using hash tags (e.g., {counter}:global), which creates a hot shard. This trades even load distribution for counter atomicity correctness.",
+      "TimescaleDB on RDS vs dedicated managed service: Running TimescaleDB as a PostgreSQL extension on RDS provides operational simplicity and reuses existing PostgreSQL expertise, but limits access to TimescaleDB Cloud features (columnar compression, tiered storage). At 10,000 redirects/sec, raw click ingestion volume (~864M events/day) may exceed RDS I/O capacity, making a dedicated time-series database (InfluxDB, ClickHouse) a better long-term fit.",
+      "Flink on EMR Serverless vs managed Kinesis Data Analytics: EMR Serverless provides more control over Flink configuration and lower cost at scale but introduces cold-start latency (30-120 seconds) that can cause Kafka consumer lag spikes. Kinesis Data Analytics (managed Flink) offers faster startup and tighter AWS integration but at higher cost and with less configuration flexibility.",
+      "Multi-language microservices (Node.js, Go, Python): Using Go for the redirect hot path maximizes throughput, while Python suits analytics and Node.js suits the creation API. However, this creates operational complexity: three language runtimes, three sets of dependencies, three CI/CD pipelines, and three sets of security patches to maintain. A single-language approach (Go or Node.js throughout) would reduce operational burden at some performance cost."
+    ],
+    "verification_steps": [
+      "1. SECURITY - API Key Validation: Create a valid API key, make a successful request, then revoke the key in the database and verify that subsequent requests are rejected within 5 seconds (accounting for Lambda authorizer cache TTL). Attempt to use a key from a different tenant to access another tenant's URLs and verify 403 is returned.",
+      "2. SECURITY - SSRF Prevention: Submit URL creation requests with targets: http://169.254.169.254/latest/meta-data/, http://localhost:5432, http://10.0.0.1, and http://[::1]. Verify all return 400 with a descriptive error and that no outbound connections are logged from the validation service to these addresses.",
+      "3. FUNCTIONAL - Short Code Uniqueness: Run a load test creating 100,000 URLs concurrently across 50 parallel clients. Query PostgreSQL for duplicate short_code values: SELECT short_code, COUNT(*) FROM urls GROUP BY short_code HAVING COUNT(*) > 1. Verify zero duplicates exist.",
+      "4. PERFORMANCE - Redirect Latency at Scale: Using a load testing tool (k6 or Locust), ramp to 10,000 requests/sec against the redirect endpoint for a set of 1,000 pre-created short URLs. Verify p50 latency < 10ms, p95 < 50ms, p99 < 200ms, and error rate < 0.1%. Monitor Redis cache hit rate (should be > 95% after warm-up) via ElastiCache CloudWatch metrics.",
+      "5. AVAILABILITY - Redis Failover Resilience: Trigger a Redis primary node failover in ElastiCache (using the AWS console failover action). Verify that redirect service continues serving requests within 5 seconds of failover completion by falling back to PostgreSQL reads. Verify that counter-based code generation either recovers or falls back to random generation without returning 500 errors.",
+      "6. DATA INTEGRITY - Analytics Accuracy: Create a short URL, generate exactly 1,000 redirect requests to it, wait 10 minutes for Flink processing and aggregation jobs to complete, then query the Analytics Query Service for click count. Verify the returned count equals 1,000 \u00b1 0 (exactly, given idempotent writes). Check TimescaleDB directly: SELECT COUNT(*) FROM click_events WHERE short_code = '<code>'.",
+      "7. OPERATIONAL - 90-Day Purge Correctness: Insert synthetic click records with created_at timestamps of exactly 89 days, 90 days, and 91 days ago. Trigger the purge Lambda in dry-run mode and verify it identifies only the 91-day record for deletion. Execute in live mode and verify only the 91-day record is deleted, the 89-day and 90-day records remain, and the audit log entry is written.",
+      "8. SECURITY - Tenant Isolation: Create two tenants (Tenant A and Tenant B) each with their own API keys and URLs. Using Tenant A's API key, attempt to: (a) retrieve Tenant B's URL details, (b) query analytics for Tenant B's short codes, (c) deactivate Tenant B's URLs. Verify all three return 403 Forbidden and that no cross-tenant data is leaked in error messages.",
+      "9. SCALABILITY - Connection Pool Limits: Scale the URL Shortener Service ECS tasks to maximum (e.g., 50 tasks). Monitor Aurora DatabaseConnections CloudWatch metric and verify it stays below 80% of max_connections. Simulate a PgBouncer instance failure and verify requests fail over to the remaining PgBouncer instances within 10 seconds without data loss.",
+      "10. FUNCTIONAL - URL Expiration: Create a short URL with a TTL of 60 seconds. Verify it redirects successfully at T+30s. Wait until T+90s and verify the redirect returns 410 Gone (not 404). Verify the Redis cache entry has been evicted or marked expired. Verify the Background Worker's expiration sweep has updated the active status in PostgreSQL."
+    ],
+    "test_strategy": "The test strategy follows a pyramid model with four layers. At the base, unit tests (targeting >85% coverage) validate individual functions: Base62 encoding/decoding correctness across boundary values, URL validation logic including SSRF denylist enforcement, Zod schema validation for all API inputs, and analytics aggregation arithmetic. The second layer comprises integration tests using Docker Compose to spin up real PostgreSQL, Redis, and Kafka instances: URL creation-to-redirect round trips, cache miss fallback to PostgreSQL, Kafka event publication and consumption, and PgBouncer connection pooling behavior. The third layer uses contract testing (Pact) between the API Gateway and downstream services to prevent breaking API changes across the polyglot service boundary. The fourth layer is end-to-end performance and chaos testing: k6 load tests at 110% of target throughput (11,000 redirects/sec) run in a staging environment mirroring production infrastructure, combined with AWS Fault Injection Simulator (FIS) experiments for Redis node failure, Aurora failover, and ECS task termination. Security testing runs as a separate pipeline stage using OWASP ZAP for API scanning, Semgrep for SAST across all three language codebases, and Trivy for container image vulnerability scanning. All tests run in CI/CD (GitHub Actions) with performance regression gates: any PR that increases p99 redirect latency by more than 20% is automatically blocked.",
+    "guardrails": [
+      "Rate limiting: Maximum 100 URL creations per minute per API key; maximum 10,000 redirects per minute per API key; maximum 50 concurrent batch creation requests per tenant (enforced at API Gateway WAF and Redis sliding window counters).",
+      "URL validation hard limits: Maximum input URL length of 2,048 characters; maximum custom alias length of 50 characters; reachability check timeout hard-capped at 3 seconds with no retries on the synchronous path; maximum 100 URLs per batch creation request.",
+      "Redis memory guardrail: ElastiCache cluster configured with maxmemory-policy allkeys-lru; alert at 75% memory utilization, auto-scale or evict at 85%; never store values larger than 1MB in the redirect cache.",
+      "Aurora connection limits: PgBouncer max_client_conn set to 1,000 per instance; Aurora max_connections parameter set to 500 (instance-size dependent); CloudWatch alarm triggers at 400 active connections; ECS task scale-out blocked if Aurora connections exceed 450.",
+      "Kafka topic retention: Click event topics configured with retention.bytes=100GB and retention.ms=1209600000 (14 days); consumer group lag alarm at 1,000,000 messages triggers PagerDuty; Flink job auto-restarts limited to 3 attempts within 10 minutes before alerting on-call.",
+      "Analytics data volume: TimescaleDB chunk interval set to 1 day; automatic compression enabled for chunks older than 7 days; storage alarm at 80% of allocated RDS storage; raw click data hard-deleted at 91 days (1-day grace after 90-day policy).",
+      "ECS Fargate auto-scaling bounds: Redirect Service minimum 3 tasks, maximum 100 tasks, scale-out at 70% CPU; URL Shortener Service minimum 2 tasks, maximum 30 tasks, scale-out at 60% CPU; scale-in cooldown 300 seconds to prevent thrashing.",
+      "WAF rules: Block requests with payloads exceeding 8KB; block IPs with more than 500 4xx responses in 5 minutes; enable AWS Managed Rules (AWSManagedRulesCommonRuleSet, AWSManagedRulesKnownBadInputsRuleSet); geographic blocking configurable per tenant.",
+      "Celery task limits: Maximum task execution time of 300 seconds (hard kill after 360 seconds); maximum 3 retries with exponential backoff (base 2, max 600 seconds); Dead Letter Queue retention of 14 days; maximum 1,000 concurrent Celery workers across all ECS tasks."
+    ],
+    "recommendations": [
+      "Implement URL enumeration protection: The sequential counter-based Base62 generation makes short codes predictable. Add an optional URL privacy mode that uses cryptographically random codes (CSPRNG) for sensitive URLs, and implement access logging with anomaly detection to flag sequential enumeration patterns (e.g., more than 50 sequential code lookups from a single IP in 60 seconds).",
+      "Introduce a read-through cache warming strategy: Pre-populate Redis with the top 10,000 most-clicked URLs on service startup and after cache flushes, using a background job that queries PostgreSQL for URLs ordered by click_count DESC. This eliminates cold-start latency spikes and reduces Aurora read replica load during deployments.",
+      "Add OpenTelemetry distributed tracing: Instrument all services (Node.js, Go, Python) with OpenTelemetry SDK sending traces to AWS X-Ray or Jaeger. This is critical for diagnosing latency in the redirect hot path (Redis lookup \u2192 PostgreSQL fallback \u2192 Kafka publish) and for correlating analytics pipeline delays from click event to aggregated summary.",
+      "Implement custom vanity domain support as the next major feature: The architecture already supports multi-tenancy via API keys. Extending to custom domains requires adding a domain verification workflow (DNS TXT record validation), a wildcard TLS certificate provisioning pipeline (AWS Certificate Manager + Route 53), and a domain-to-tenant mapping table in PostgreSQL. Design the data model now to avoid schema migrations later.",
+      "Adopt ClickHouse for analytics at scale: TimescaleDB on RDS will face I/O and storage limitations at 10,000 redirects/sec (approximately 864M raw events/day). Evaluate migrating the analytics store to ClickHouse (self-managed on EC2 or ClickHouse Cloud), which provides columnar compression ratios of 10:1 or better and sub-second aggregation queries over billions of rows, enabling richer real-time analytics dashboards.",
+      "Implement a URL safety scanning integration: Integrate with Google Safe Browsing API or VirusTotal during URL creation to flag malicious destinations. Store the safety scan result and timestamp in the URL record. Automatically deactivate URLs flagged as malicious and notify the tenant. Re-scan URLs periodically (e.g., weekly) via the Background Worker Service to catch URLs that become malicious after creation.",
+      "Add multi-region active-passive failover: The current architecture is single-region. For production SLA of 99.9%+ uptime, implement Aurora Global Database for cross-region replication (< 1 second RPO), replicate ElastiCache snapshots to a secondary region, and use Route 53 health checks with latency-based routing to fail over traffic within 60 seconds of a regional outage.",
+      "Implement tenant usage quotas and billing hooks: Add a quota management service that tracks monthly URL creation counts, total active URLs, and redirect volume per tenant against configurable plan limits. Emit quota utilization events to an SNS topic that can trigger billing system webhooks, usage alerts at 80%/100% of quota, and automatic throttling when quotas are exceeded, enabling a freemium or tiered pricing model."
+    ]
+  },
+  "implementation_rationale": "System designed based on 10 functional requirements.",
+  "assumptions_and_limitations": [
+    "Short URL codes will be 7-character Base62 alphanumeric strings generated via a hash or counter-based approach",
+    "Authentication will use API keys for programmatic access with optional user account registration",
+    "Analytics data will be retained for 90 days by default with aggregated summaries kept indefinitely",
+    "Custom vanity domains are out of scope for the initial version",
+    "The service will be deployed on a major cloud provider (AWS/GCP/Azure) using containerized microservices",
+    "Scalability target is defined as supporting up to 10,000 redirects/sec and 1,000 URL creations/sec",
+    "The service is multi-tenant, with each tenant identified by an API key",
+    "A relational database (e.g., PostgreSQL) will be used for URL persistence and a cache layer (e.g., Redis) for hot redirects"
+  ]
+}

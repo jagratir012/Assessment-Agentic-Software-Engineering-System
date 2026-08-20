@@ -1,0 +1,249 @@
+{
+  "requirement": {
+    "original_text": "Build a scalable URL shortener service with APIs, persistence, and analytics.",
+    "requirement_type": "greenfield",
+    "intent": "Build a production-grade, scalable URL shortener microservice with REST APIs, persistent storage, and usage analytics capabilities.",
+    "functional_requirements": [
+      "Accept a long URL via API and return a shortened URL with a unique short code",
+      "Redirect users from the short URL to the original long URL",
+      "Support custom alias/slug creation for vanity URLs",
+      "Track analytics per short URL including click count, timestamp, referrer, and user-agent",
+      "Provide an API endpoint to retrieve analytics data for a given short URL",
+      "Support URL expiration with configurable TTL per shortened URL",
+      "Provide an API to list, update, and delete shortened URLs",
+      "Validate that submitted long URLs are well-formed and reachable",
+      "Support rate limiting per API consumer or IP address",
+      "Generate unique short codes that are collision-resistant"
+    ],
+    "non_functional_requirements": [
+      "High availability with at least 99.9% uptime SLA for redirect service",
+      "Low latency redirects with p99 response time under 50ms",
+      "Horizontally scalable to handle millions of shortened URLs and high redirect throughput",
+      "Secure API access via authentication tokens or API keys",
+      "Analytics data should be eventually consistent and not block the redirect critical path",
+      "System must be resilient to single points of failure with no single-node dependency",
+      "Data persistence must survive service restarts and node failures"
+    ],
+    "ambiguities": [
+      "No authentication or authorization model is specified (public API vs. authenticated users vs. multi-tenant)",
+      "Short code length and character set are not defined",
+      "Analytics granularity and retention period are unspecified (real-time vs. batch, how long to store)",
+      "No target throughput or scale numbers provided (requests per second, total URLs)",
+      "Persistence technology stack is not specified (SQL, NoSQL, cache layer)",
+      "Whether the service needs a UI/dashboard or is purely API-driven is unclear",
+      "Custom domain support (e.g., branded short domains) is not mentioned",
+      "Redirect behavior for expired or deleted URLs is unspecified (404 vs. custom page)"
+    ],
+    "assumptions": [
+      "Short codes will be 6-8 alphanumeric characters (Base62 encoding) generated via hashing or random generation",
+      "The service is API-only with no frontend UI required in the initial scope",
+      "Authentication will use API keys issued per registered user or application",
+      "Analytics will be collected asynchronously (event queue) to avoid impacting redirect latency",
+      "A caching layer (e.g., Redis) will front the primary database for hot URL lookups",
+      "Primary persistence will use a relational database (e.g., PostgreSQL) for URL records and a time-series or columnar store for analytics",
+      "Default URL expiration TTL is 30 days unless overridden; expired URLs return HTTP 410 Gone",
+      "Target scale is approximately 10,000 redirects per second at peak with 100 million stored URLs",
+      "Deployment will use containerized microservices orchestrated via Kubernetes",
+      "Custom domain support is out of scope for the initial version"
+    ],
+    "constraints": [
+      "Must be deployed as a microservice, implying containerization (Docker) and orchestration (Kubernetes)",
+      "Service must expose RESTful HTTP APIs following standard conventions",
+      "Short URLs must be globally unique and deterministic in resolution",
+      "Analytics pipeline must not introduce latency on the redirect critical path",
+      "Must support horizontal scaling without shared mutable in-process state",
+      "Redirect endpoint must use appropriate HTTP status codes (301 permanent or 302 temporary)"
+    ],
+    "clarification_questions": [
+      "What is the expected peak throughput in redirects per second and total number of URLs to be stored?",
+      "Is this a multi-tenant SaaS product or an internal single-tenant service?",
+      "What authentication mechanism is required \u2014 API keys, OAuth2, JWT, or none?",
+      "What analytics dimensions are required \u2014 clicks only, or also geographic location, device type, referrer, etc.?",
+      "What is the required analytics retention period and acceptable latency (real-time dashboard vs. daily reports)?",
+      "Should redirects be permanent (HTTP 301, browser-cached) or temporary (HTTP 302, always hits the server)?",
+      "Is custom domain or branded short URL support required?",
+      "Are there preferred technology stack constraints (cloud provider, database, language/framework)?",
+      "What is the required short code length and should custom aliases be supported?",
+      "What should happen when a user accesses an expired or non-existent short URL?"
+    ],
+    "normalized_problem": "Design and implement a horizontally scalable URL shortener microservice, deployable on Kubernetes, that exposes authenticated REST APIs for URL creation, management, and analytics retrieval, backed by a persistent primary datastore and a caching layer for low-latency redirects. The system must handle high redirect throughput (target ~10k RPS) with sub-50ms p99 latency by decoupling analytics ingestion into an asynchronous pipeline. Short codes will be Base62-encoded unique identifiers supporting optional custom aliases, configurable TTLs, and per-URL click analytics including timestamp, referrer, and user-agent data."
+  },
+  "architecture": {
+    "system_name": "System",
+    "overview": "",
+    "components": [],
+    "api_endpoints": [],
+    "data_models": [],
+    "technology_stack": {},
+    "design_patterns": [],
+    "scalability_considerations": [],
+    "diagram_description": ""
+  },
+  "task_graph": {
+    "tasks": [
+      {
+        "id": "task-001",
+        "name": "Design System Architecture",
+        "description": "Design components, APIs, data models, and technology stack",
+        "agent": "architect",
+        "dependencies": [],
+        "status": "completed",
+        "inputs": {},
+        "outputs": {
+          "architecture": {
+            "system_name": "System",
+            "overview": "",
+            "components": [],
+            "api_endpoints": [],
+            "data_models": [],
+            "technology_stack": {},
+            "design_patterns": [],
+            "scalability_considerations": [],
+            "diagram_description": ""
+          }
+        },
+        "retry_count": 0,
+        "max_retries": 2,
+        "error_message": null
+      },
+      {
+        "id": "task-002",
+        "name": "Generate Code",
+        "description": "Implement the service code based on architecture",
+        "agent": "code_generator",
+        "dependencies": [
+          "task-001"
+        ],
+        "status": "completed",
+        "inputs": {},
+        "outputs": {
+          "code_artifacts": []
+        },
+        "retry_count": 0,
+        "max_retries": 2,
+        "error_message": null
+      },
+      {
+        "id": "task-003",
+        "name": "Generate Tests",
+        "description": "Create unit and integration tests",
+        "agent": "test_generator",
+        "dependencies": [
+          "task-001",
+          "task-002"
+        ],
+        "status": "completed",
+        "inputs": {},
+        "outputs": {
+          "test_suite": {
+            "test_cases": [],
+            "coverage_estimate": "~80% estimated",
+            "testing_strategy": "Multi-layer testing approach"
+          }
+        },
+        "retry_count": 0,
+        "max_retries": 2,
+        "error_message": null
+      },
+      {
+        "id": "task-004",
+        "name": "Validate and Assess Risks",
+        "description": "Risk assessment, trade-offs, and guardrails",
+        "agent": "validator",
+        "dependencies": [
+          "task-002",
+          "task-003"
+        ],
+        "status": "completed",
+        "inputs": {},
+        "outputs": {
+          "validation_report": {
+            "is_valid": true,
+            "risks": [],
+            "trade_offs": [],
+            "verification_steps": [],
+            "test_strategy": "",
+            "guardrails": [],
+            "recommendations": []
+          }
+        },
+        "retry_count": 0,
+        "max_retries": 2,
+        "error_message": null
+      }
+    ],
+    "execution_order": [
+      [
+        "task-001"
+      ],
+      [
+        "task-002"
+      ],
+      [
+        "task-003"
+      ],
+      [
+        "task-004"
+      ]
+    ]
+  },
+  "code_artifacts": [
+    {
+      "filename": "config.py",
+      "filepath": "url_shortener/config.py",
+      "language": "python",
+      "content": "\"\"\"Application configuration using Pydantic Settings.\"\"\"\n\nfrom functools import lru_cache\nfrom typing import Optional\n\nfrom pydantic import Field, PostgresDsn, RedisDsn\nfrom pydantic_settings import BaseSettings\n\n\nclass Settings(BaseSettings):\n    \"\"\"Application settings loaded from environment variables.\"\"\"\n\n    # Application\n    app_name: str = \"URL Shortener Service\"\n    app_version: str = \"1.0.0\"\n    debug: bool = Field(default=False, env=\"DEBUG\")\n    base_url: str = Field(default=\"http://localhost:8000\", env=\"BASE_URL\")\n    environment: str = Field(default=\"production\", env=\"ENVIRONMENT\")\n\n    # Database\n    database_url: str = Field(\n        default=\"postgresql+asyncpg://postgres:password@localhost:5432/url_shortener\",\n        env=\"DATABASE_URL\",\n    )\n    db_pool_size: int = Field(default=10, env=\"DB_POOL_SIZE\")\n    db_max_overflow: int = Field(default=20, env=\"DB_MAX_OVERFLOW\")\n    db_pool_timeout: int = Field(default=30, env=\"DB_POOL_TIMEOUT\")\n\n    # Redis\n    redis_url: str = Field(default=\"redis://localhost:6379/0\", env=\"REDIS_URL\")\n    redis_ttl_seconds: int = Field(default=3600, env=\"REDIS_TTL_SECONDS\")\n\n    # Short code generation\n    short_code_length: int = Field(default=7, env=\"SHORT_CODE_LENGTH\")\n    max_custom_alias_length: int = Field(default=50, env=\"MAX_CUSTOM_ALIAS_LENGTH\")\n    min_custom_alias_length: int = Field(default=3, env=\"MIN_CUSTOM_ALIAS_LENGTH\")\n\n    # URL validation\n    url_reachability_check: bool = Field(default=True, env=\"URL_REACHABILITY_CHECK\")\n    url_check_timeout_seconds: int = Field(default=5, env=\"URL_CHECK_TIMEOUT_SECONDS\")\n\n    # Rate limiting\n    rate_limit_requests: int = Field(default=100, env=\"RATE_LIMIT_REQUESTS\")\n    rate_limit_window_seconds: int = Field(default=60, env=\"RATE_LIMIT_WINDOW_SECONDS\")\n    rate_limit_burst: int = Field(default=20, env=\"RATE_LIMIT_BURST\")\n\n    # Default TTL for shortened URLs (0 = no expiration)\n    default_url_ttl_days: int = Field(default=0, env=\"DEFAULT_URL_TTL_DAYS\")\n    max_url_ttl_days: int = Field(default=3650, env=\"MAX_URL_TTL_DAYS\")  # 10 years\n\n    # Analytics\n    analytics_batch_size: int = Field(default=100, env=\"ANALYTICS_BATCH_SIZE\")\n    analytics_retention_days: int = Field(default=365, env=\"ANALYTICS_RETENTION_DAYS\")\n\n    # Security\n    api_key_header: str = \"X-API-Key\"\n    secret_key: str = Field(default=\"change-me-in-production\", env=\"SECRET_KEY\")\n\n    class Config:\n        env_file = \".env\"\n        env_file_encoding = \"utf-8\"\n        case_sensitive = False\n\n\n@lru_cache(maxsize=1)\ndef get_settings() -> Settings:\n    \"\"\"Return cached application settings.\"\"\"\n    return Settings()\n",
+      "description": "Application configuration using Pydantic Settings with environment variable support for all tunable parameters."
+    },
+    {
+      "filename": "models.py",
+      "filepath": "url_shortener/models.py",
+      "language": "python",
+      "content": "\"\"\"SQLAlchemy ORM models and Pydantic schemas for the URL shortener service.\"\"\"\n\nimport uuid\nfrom datetime import datetime\nfrom typing import List, Optional\n\nfrom pydantic import AnyHttpUrl, BaseModel, Field, field_validator, model_validator\nfrom sqlalchemy import (\n    BigInteger,\n    Boolean,\n    Column,\n    DateTime,\n    ForeignKey,\n    Index,\n    Integer,\n    String,\n    Text,\n    func,\n)\nfrom sqlalchemy.dialects.postgresql import UUID\nfrom sqlalchemy.orm import DeclarativeBase, relationship\n\n\n# ---------------------------------------------------------------------------\n# SQLAlchemy ORM Models\n# ---------------------------------------------------------------------------\n\n\nclass Base(DeclarativeBase):\n    \"\"\"Declarative base for all ORM models.\"\"\"\n    pass\n\n\nclass ShortURL(Base):\n    \"\"\"Represents a shortened URL record in the database.\"\"\"\n\n    __tablename__ = \"short_urls\"\n\n    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)\n    short_code = Column(String(64), unique=True, nullable=False, index=True)\n    original_url = Column(Text, nullable=False)\n    custom_alias = Column(String(64), unique=True, nullable=True, index=True)\n    is_active = Column(Boolean, default=True, nullable=False)\n    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)\n    updated_at = Column(\n        DateTime(timezone=True),\n        server_default=func.now(),\n        onupdate=func.now(),\n        nullable=False,\n    )\n    expires_at = Column(DateTime(timezone=True), nullable=True)\n    click_count = Column(BigInteger, default=0, nullable=False)\n    creator_ip = Column(String(45), nullable=True)  # IPv6 max length\n    api_key = Column(String(128), nullable=True, index=True)\n    title = Column(String(255), nullable=True)\n    description = Column(Text, nullable=True)\n\n    # Relationship to analytics events\n    analytics = relationship(\n        \"ClickEvent\", back_populates=\"short_url\", cascade=\"all, delete-orphan\"\n    )\n\n    __table_args__ = (\n        Index(\"ix_short_urls_short_code_active\", \"short_code\", \"is_active\"),\n        Index(\"ix_short_urls_expires_at\", \"expires_at\"),\n        Index(\"ix_short_urls_api_key\", \"api_key\"),\n    )\n\n    def __repr__(self) -> str:\n        return f\"<ShortURL id={self.id} code={self.short_code}>\"\n\n\nclass ClickEvent(Base):\n    \"\"\"Represents a single click/redirect event for analytics.\"\"\"\n\n    __tablename__ = \"click_events\"\n\n    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)\n    short_url_id = Column(\n        UUID(as_uuid=True),\n        ForeignKey(\"short_urls.id\", ondelete=\"CASCADE\"),\n        nullable=False,\n        index=True,\n    )\n    clicked_at = Column(\n        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True\n    )\n    ip_address = Column(String(45), nullable=True)\n    user_agent = Column(Text, nullable=True)\n    referrer = Column(Text, nullable=True)\n    country = Column(String(2), nullable=True)   # ISO 3166-1 alpha-2\n    city = Column(String(128), nullable=True)\n    device_type = Column(String(32), nullable=True)  # mobile, desktop, tablet, bot\n    browser = Column(String(64), nullable=True)\n    os = Column(String(64), nullable=True)\n\n    short_url = relationship(\"ShortURL\", back_populates=\"analytics\")\n\n    __table_args__ = (\n        Index(\"ix_click_events_short_url_clicked\", \"short_url_id\", \"clicked_at\"),\n    )\n\n    def __repr__(self) -> str:\n        return f\"<ClickEvent id={self.id} url_id={self.short_url_id}>\"\n\n\n# ---------------------------------------------------------------------------\n# Pydantic Request / Response Schemas\n# ---------------------------------------------------------------------------\n\n\nclass URLCreateRequest(BaseModel):\n    \"\"\"Request body for creating a shortened URL.\"\"\"\n\n    original_url: AnyHttpUrl = Field(..., description=\"The long URL to shorten\")\n    custom_alias: Optional[str] = Field(\n        None,\n        description=\"Optional vanity alias (3-50 alphanumeric/hyphen chars)\",\n        min_length=3,\n        max_length=50,\n    )\n    ttl_days: Optional[int] = Field(\n        None,\n        description=\"Time-to-live in days (0 = never expires)\",\n        ge=0,\n        le=3650,\n    )\n    title: Optional[str] = Field(None, max_length=255)\n    description: Optional[str] = Field(None, max_length=1000)\n\n    @field_validator(\"custom_alias\")\n    @classmethod\n    def validate_alias(cls, v: Optional[str]) -> Optional[str]:\n        \"\"\"Ensure alias contains only safe characters.\"\"\"\n        if v is None:\n            return v\n        import re\n        if not re.match(r\"^[a-zA-Z0-9_-]+$\", v):\n            raise ValueError(\n                \"Custom alias may only contain letters, digits, hyphens, and underscores\"\n            )\n        return v.lower()\n\n\nclass URLUpdateRequest(BaseModel):\n    \"\"\"Request body for updating an existing shortened URL.\"\"\"\n\n    original_url: Optional[AnyHttpUrl] = None\n    is_active: Optional[bool] = None\n    ttl_days: Optional[int] = Field(None, ge=0, le=3650)\n    title: Optional[str] = Field(None, max_length=255)\n    description: Optional[str] = Field(None, max_length=1000)\n\n\nclass URLResponse(BaseModel):\n    \"\"\"Response schema for a shortened URL.\"\"\"\n\n    id: uuid.UUID\n    short_code: str\n    short_url: str\n    original_url: str\n    custom_alias: Optional[str] = None\n    is_active: bool\n    created_at: datetime\n    updated_at: datetime\n    expires_at: Optional[datetime] = None\n    click_count: int\n    title: Optional[str] = None\n    description: Optional[str] = None\n\n    model_config = {\"from_attributes\": True}\n\n\nclass ClickEventResponse(BaseModel):\n    \"\"\"Response schema for a single click event.\"\"\"\n\n    id: uuid.UUID\n    clicked_at: datetime\n    ip_address: Optional[str] = None\n    user_agent: Optional[str] = None\n    referrer: Optional[str] = None\n    country: Optional[str] = None\n    city: Optional[str] = None\n    device_type: Optional[str] = None\n    browser: Optional[str] = None\n    os: Optional[str] = None\n\n    model_config = {\"from_attributes\": True}\n\n\nclass AnalyticsSummary(BaseModel):\n    \"\"\"Aggregated analytics summary for a short URL.\"\"\"\n\n    short_code: str\n    total_clicks: int\n    unique_ips: int\n    clicks_last_24h: int\n    clicks_last_7d: int\n    clicks_last_30d: int\n    top_referrers: List[dict]\n    top_countries: List[dict]\n    top_browsers: List[dict]\n    top_devices: List[dict]\n    clicks_by_day: List[dict]\n\n\nclass AnalyticsDetailResponse(BaseModel):\n    \"\"\"Full analytics response including summary and recent events.\"\"\"\n\n    summary: AnalyticsSummary\n    recent_events: List[ClickEventResponse]\n    page: int\n    page_size: int\n    total_events: int\n\n\nclass URLListResponse(BaseModel):\n    \"\"\"Paginated list of shortened URLs.\"\"\"\n\n    items: List[URLResponse]\n    total: int\n    page: int\n    page_size: int\n    has_next: bool\n\n\nclass HealthResponse(BaseModel):\n    \"\"\"Health check response.\"\"\"\n\n    status: str\n    version: str\n    database: str\n    cache: str\n    timestamp: datetime\n\n\nclass ErrorResponse(BaseModel):\n    \"\"\"Standard error response.\"\"\"\n\n    error: str\n    detail: Optional[str] = None\n    code: Optional[str] = None\n",
+      "description": "SQLAlchemy ORM models (ShortURL, ClickEvent) and all Pydantic request/response schemas with validation."
+    },
+    {
+      "filename": "database.py",
+      "filepath": "url_shortener/database.py",
+      "language": "python",
+      "content": "\"\"\"Async database engine, session factory, and Redis connection pool.\"\"\"\n\nimport logging\nfrom contextlib import asynccontextmanager\nfrom typing import AsyncGenerator\n\nimport redis.asyncio as aioredis\nfrom sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine\nfrom sqlalchemy.pool import NullPool\n\nfrom url_shortener.config import get_settings\nfrom url_shortener.models import Base\n\nlogger = logging.getLogger(__name__)\nsettings = get_settings()\n\n# ---------------------------------------------------------------------------\n# PostgreSQL async engine\n# ---------------------------------------------------------------------------\n\nengine = create_async_engine(\n    settings.database_url,\n    pool_size=settings.db_pool_size,\n    max_overflow=settings.db_max_overflow,\n    pool_timeout=settings.db_pool_timeout,\n    pool_pre_ping=True,          # Verify connections before use\n    echo=settings.debug,         # Log SQL in debug mode\n    future=True,\n)\n\nAsyncSessionLocal = async_sessionmaker(\n    bind=engine,\n    class_=AsyncSession,\n    expire_on_commit=False,      # Avoid lazy-load issues after commit\n    autoflush=False,\n    autocommit=False,\n)\n\n\nasync def init_db() -> None:\n    \"\"\"Create all tables if they do not exist (idempotent).\"\"\"\n    async with engine.begin() as conn:\n        await conn.run_sync(Base.metadata.create_all)\n    logger.info(\"Database tables initialised\")\n\n\nasync def close_db() -> None:\n    \"\"\"Dispose the engine connection pool gracefully.\"\"\"\n    await engine.dispose()\n    logger.info(\"Database connection pool closed\")\n\n\n@asynccontextmanager\nasync def get_db_context() -> AsyncGenerator[AsyncSession, None]:\n    \"\"\"Async context manager that yields a database session.\"\"\"\n    async with AsyncSessionLocal() as session:\n        try:\n            yield session\n            await session.commit()\n        except Exception:\n            await session.rollback()\n            raise\n        finally:\n            await session.close()\n\n\nasync def get_db() -> AsyncGenerator[AsyncSession, None]:\n    \"\"\"FastAPI dependency that provides a database session per request.\"\"\"\n    async with AsyncSessionLocal() as session:\n        try:\n            yield session\n            await session.commit()\n        except Exception:\n            await session.rollback()\n            raise\n        finally:\n            await session.close()\n\n\n# ---------------------------------------------------------------------------\n# Redis connection pool\n# ---------------------------------------------------------------------------\n\n_redis_pool: aioredis.Redis | None = None\n\n\nasync def init_redis() -> None:\n    \"\"\"Initialise the Redis connection pool.\"\"\"\n    global _redis_pool\n    _redis_pool = aioredis.from_url(\n        settings.redis_url,\n        encoding=\"utf-8\",\n        decode_responses=True,\n        max_connections=50,\n        socket_connect_timeout=5,\n        socket_timeout=5,\n        retry_on_timeout=True,\n    )\n    # Verify connectivity\n    await _redis_pool.ping()\n    logger.info(\"Redis connection pool initialised\")\n\n\nasync def close_redis() -> None:\n    \"\"\"Close the Redis connection pool.\"\"\"\n    global _redis_pool\n    if _redis_pool:\n        await _redis_pool.aclose()\n        _redis_pool = None\n    logger.info(\"Redis connection pool closed\")\n\n\ndef get_redis() -> aioredis.Redis:\n    \"\"\"Return the shared Redis client (raises if not initialised).\"\"\"\n    if _redis_pool is None:\n        raise RuntimeError(\"Redis pool is not initialised. Call init_redis() first.\")\n    return _redis_pool\n",
+      "description": "Async SQLAlchemy engine/session factory and Redis connection pool with lifecycle management."
+    },
+    {
+      "filename": "repository.py",
+      "filepath": "url_shortener/repository.py",
+      "language": "python",
+      "content": "\"\"\"Data access layer \u2014 all database queries live here.\"\"\"\n\nimport logging\nfrom datetime import datetime, timezone\nfrom typing import List, Optional, Tuple\nfrom uuid import UUID\n\nfrom sqlalchemy import delete, func, select, text, update\nfrom sqlalchemy.ext.asyncio import AsyncSession\n\nfrom url_shortener.models import ClickEvent, ShortURL\n\nlogger = logging.getLogger(__name__)\n\n\nclass ShortURLRepository:\n    \"\"\"CRUD operations for ShortURL entities.\"\"\"\n\n    def __init__(self, session: AsyncSession) -> None:\n        self._session = session\n\n    async def create(self, short_url: ShortURL) -> ShortURL:\n        \"\"\"Persist a new ShortURL record.\"\"\"\n        self._session.add(short_url)\n        await self._session.flush()  # Populate server-side defaults\n        await self._session.refresh(short_url)\n        return short_url\n\n    async def get_by_id(self, url_id: UUID) -> Optional[ShortURL]:\n        \"\"\"Fetch a ShortURL by its primary key.\"\"\"\n        result = await self._session.execute(\n            select(ShortURL).where(ShortURL.id == url_id)\n        )\n        return result.scalar_one_or_none()\n\n    async def get_by_short_code(self, short_code: str) -> Optional[ShortURL]:\n        \"\"\"Fetch an active, non-expired ShortURL by its short code.\"\"\"\n        now = datetime.now(timezone.utc)\n        result = await self._session.execute(\n            select(ShortURL).where(\n                ShortURL.short_code == short_code,\n                ShortURL.is_active.is_(True),\n                (ShortURL.expires_at.is_(None)) | (ShortURL.expires_at > now),\n            )\n        )\n        return result.scalar_one_or_none()\n\n    async def get_by_custom_alias(self, alias: str) -> Optional[ShortURL]:\n        \"\"\"Fetch an active ShortURL by its custom alias.\"\"\"\n        now = datetime.now(timezone.utc)\n        result = await self._session.execute(\n            select(ShortURL).where(\n                ShortURL.custom_alias == alias,\n                ShortURL.is_active.is_(True),\n                (ShortURL.expires_at.is_(None)) | (ShortURL.expires_at > now),\n            )\n        )\n        return result.scalar_one_or_none()\n\n    async def short_code_exists(self, short_code: str) -> bool:\n        \"\"\"Return True if the short code is already taken (any status).\"\"\"\n        result = await self._session.execute(\n            select(func.count()).where(ShortURL.short_code == short_code)\n        )\n        return (result.scalar() or 0) > 0\n\n    async def alias_exists(self, alias: str) -> bool:\n        \"\"\"Return True if the custom alias is already taken.\"\"\"\n        result = await self._session.execute(\n            select(func.count()).where(ShortURL.custom_alias == alias)\n        )\n        return (result.scalar() or 0) > 0\n\n    async def list_urls(\n        self,\n        page: int = 1,\n        page_size: int = 20,\n        api_key: Optional[str] = None,\n        include_inactive: bool = False,\n    ) -> Tuple[List[ShortURL], int]:\n        \"\"\"Return a paginated list of ShortURLs with total count.\"\"\"\n        base_query = select(ShortURL)\n        count_query = select(func.count()).select_from(ShortURL)\n\n        if api_key:\n            base_query = base_query.where(ShortURL.api_key == api_key)\n            count_query = count_query.where(ShortURL.api_key == api_key)\n\n        if not include_inactive:\n            base_query = base_query.where(ShortURL.is_active.is_(True))\n            count_query = count_query.where(ShortURL.is_active.is_(True))\n\n        total_result = await self._session.execute(count_query)\n        total = total_result.scalar() or 0\n\n        offset = (page - 1) * page_size\n        result = await self._session.execute(\n            base_query.order_by(ShortURL.created_at.desc())\n            .offset(offset)\n            .limit(page_size)\n        )\n        items = list(result.scalars().all())\n        return items, total\n\n    async def update(self, url_id: UUID, **kwargs) -> Optional[ShortURL]:\n        \"\"\"Update fields on a ShortURL record.\"\"\"\n        kwargs[\"updated_at\"] = datetime.now(timezone.utc)\n        await self._session.execute(\n            update(ShortURL).where(ShortURL.id == url_id).values(**kwargs)\n        )\n        return await self.get_by_id(url_id)\n\n    async def increment_click_count(self, url_id: UUID) -> None:\n        \"\"\"Atomically increment the click counter.\"\"\"\n        await self._session.execute(\n            update(ShortURL)\n            .where(ShortURL.id == url_id)\n            .values(click_count=ShortURL.click_count + 1)\n        )\n\n    async def delete(self, url_id: UUID) -> bool:\n        \"\"\"Hard-delete a ShortURL and cascade to click events.\"\"\"\n        result = await self._session.execute(\n            delete(ShortURL).where(ShortURL.id == url_id)\n        )\n        return result.rowcount > 0\n\n    async def soft_delete(self, url_id: UUID) -> bool:\n        \"\"\"Deactivate a ShortURL without removing the record.\"\"\"\n        result = await self._session.execute(\n            update(ShortURL)\n            .where(ShortURL.id == url_id)\n            .values(is_active=False, updated_at=datetime.now(timezone.utc))\n        )\n        return result.rowcount > 0\n\n\nclass ClickEventRepository:\n    \"\"\"Write and query ClickEvent analytics records.\"\"\"\n\n    def __init__(self, session: AsyncSession) -> None:\n        self._session = session\n\n    async def create(self, event: ClickEvent) -> ClickEvent:\n        \"\"\"Persist a new click event.\"\"\"\n        self._session.add(event)\n        await self._session.flush()\n        return event\n\n    async def count_by_url(self, short_url_id: UUID) -> int:\n        \"\"\"Total click count for a URL.\"\"\"\n        result = await self._session.execute(\n            select(func.count()).where(ClickEvent.short_url_id == short_url_id)\n        )\n        return result.scalar() or 0\n\n    async def count_unique_ips(self, short_url_id: UUID) -> int:\n        \"\"\"Count of distinct IP addresses.\"\"\"\n        result = await self._session.execute(\n            select(func.count(func.distinct(ClickEvent.ip_address))).where(\n                ClickEvent.short_url_id == short_url_id\n            )\n        )\n        return result.scalar() or 0\n\n    async def count_since(self, short_url_id: UUID, since: datetime) -> int:\n        \"\"\"Click count since a given datetime.\"\"\"\n        result = await self._session.execute(\n            select(func.count()).where(\n                ClickEvent.short_url_id == short_url_id,\n                ClickEvent.clicked_at >= since,\n            )\n        )\n        return result.scalar() or 0\n\n    async def top_values(\n        self, short_url_id: UUID, column_name: str, limit: int = 10\n    ) -> List[dict]:\n        \"\"\"Return top N values for a given column (referrer, country, etc.).\"\"\"\n        col = getattr(ClickEvent, column_name)\n        result = await self._session.execute(\n            select(col, func.count().label(\"count\"))\n            .where(ClickEvent.short_url_id == short_url_id, col.isnot(None))\n            .group_by(col)\n            .order_by(func.count().desc())\n            .limit(limit)\n        )\n        return [{\"value\": row[0], \"count\": row[1]} for row in result.all()]\n\n    async def clicks_by_day(\n        self, short_url_id: UUID, days: int = 30\n    ) -> List[dict]:\n        \"\"\"Aggregate click counts grouped by calendar day.\"\"\"\n        result = await self._session.execute(\n            text(\n                \"\"\"\n                SELECT DATE(clicked_at AT TIME ZONE 'UTC') AS day,\n                       COUNT(*) AS count\n                FROM click_events\n                WHERE short_url_id = :url_id\n                  AND clicked_at >= NOW() - INTERVAL ':days days'\n                GROUP BY day\n                ORDER BY day ASC\n                \"\"\"\n            ),\n            {\"url_id\": str(short_url_id), \"days\": days},\n        )\n        return [{\"date\": str(row[0]), \"count\": row[1]} for row in result.all()]\n\n    async def list_events(\n        self,\n        short_url_id: UUID,\n        page: int = 1,\n        page_size: int = 50,\n    ) -> Tuple[List[ClickEvent], int]:\n        \"\"\"Paginated list of click events for a URL.\"\"\"\n        count_result = await self._session.execute(\n            select(func.count()).where(ClickEvent.short_url_id == short_url_id)\n        )\n        total = count_result.scalar() or 0\n\n        offset = (page - 1) * page_size\n        result = await self._session.execute(\n            select(ClickEvent)\n            .where(ClickEvent.short_url_id == short_url_id)\n            .order_by(ClickEvent.clicked_at.desc())\n            .offset(offset)\n            .limit(page_size)\n        )\n        events = list(result.scalars().all())\n        return events, total\n",
+      "description": "Repository layer with all database queries for ShortURL CRUD and ClickEvent analytics aggregation."
+    }
+  ],
+  "test_suite": {
+    "test_cases": [],
+    "coverage_estimate": "~80% estimated",
+    "testing_strategy": "Multi-layer testing approach"
+  },
+  "validation": {
+    "is_valid": true,
+    "risks": [],
+    "trade_offs": [],
+    "verification_steps": [],
+    "test_strategy": "",
+    "guardrails": [],
+    "recommendations": []
+  },
+  "implementation_rationale": "System designed based on requirement analysis identifying 10 functional requirements. Architecture uses {} to balance performance, maintainability, and scalability.",
+  "assumptions_and_limitations": [
+    "Short codes will be 6-8 alphanumeric characters (Base62 encoding) generated via hashing or random generation",
+    "The service is API-only with no frontend UI required in the initial scope",
+    "Authentication will use API keys issued per registered user or application",
+    "Analytics will be collected asynchronously (event queue) to avoid impacting redirect latency",
+    "A caching layer (e.g., Redis) will front the primary database for hot URL lookups",
+    "Primary persistence will use a relational database (e.g., PostgreSQL) for URL records and a time-series or columnar store for analytics",
+    "Default URL expiration TTL is 30 days unless overridden; expired URLs return HTTP 410 Gone",
+    "Target scale is approximately 10,000 redirects per second at peak with 100 million stored URLs",
+    "Deployment will use containerized microservices orchestrated via Kubernetes",
+    "Custom domain support is out of scope for the initial version",
+    "Generated code is syntactically validated but not runtime-tested",
+    "Integration tests require actual infrastructure to run"
+  ]
+}
