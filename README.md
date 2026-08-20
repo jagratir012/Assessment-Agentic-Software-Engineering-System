@@ -432,6 +432,6 @@ The system demonstrates **controlled autonomy** where:
 
 ---
 
-## 📄 License
+## 📄 Created By
 
-MIT
+Jagrati with help of Amazon kiro AI
